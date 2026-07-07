@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Generated data / model outputs (regenerate via data/load_runs.py and scripts/fit_model.py)
+data/processed/
+outputs/*
+!outputs/figures/
+!outputs/figures/*.png
+
+# Internal debugging log, not part of the public repo
+docs/debugging-journal.md
