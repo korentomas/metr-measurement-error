@@ -1,10 +1,10 @@
 """Assemble model-ready arrays for the Bayesian measurement-error time-horizon
-model from the filtered human-timing data (data/load_runs.py output) plus the
-raw runs.jsonl (for model-vs-task success/failure counts) and METR's
+model from the filtered human-timing data (scripts/load_runs.py output) plus
+the raw runs.jsonl (for model-vs-task success/failure counts) and METR's
 release-dates table (for the linear ability trend in theta_m).
 
 This module produces a single `ModelData` container consumed by
-`models/time_horizon_model.py::build_model`.
+`metr_measurement_error.model::build_model`.
 """
 
 from __future__ import annotations
@@ -17,16 +17,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Sibling checkouts expected next to this repo (see README "Setup"):
-# METR/eval-analysis-public and JonasMoss/metr-stats.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_SIBLINGS_ROOT = _REPO_ROOT.parent
-
-DEFAULT_RUNS_JSONL = (
-    _SIBLINGS_ROOT / "eval-analysis-public"
-    / "reports/time-horizon-1-1/data/raw/runs.jsonl"
+from metr_measurement_error.paths import (
+    DEFAULT_HEADLINE_CSV,
+    DEFAULT_RELEASE_DATES,
+    DEFAULT_RUNS_JSONL,
 )
-DEFAULT_RELEASE_DATES = _SIBLINGS_ROOT / "metr-stats/data/release_dates.json"
 
 # Models missing from Moss's release_dates.json. Dates taken from METR's own
 # TH1.1 logistic-fit table (eval-analysis-public/reports/time-horizon-1-1/
@@ -39,13 +34,6 @@ RELEASE_DATE_OVERRIDES = {
     "claude_opus_4_6_inspect": "2026-02-05",
     "flamingo_2": "2026-02-05",
 }
-
-# METR's per-agent logistic-fit summaries (p50 horizon per agent), used only
-# for the optional SOTA-only restriction below.
-DEFAULT_HEADLINE_CSV = (
-    _SIBLINGS_ROOT / "eval-analysis-public"
-    / "reports/time-horizon-1-1/data/wrangled/logistic_fits/headline.csv"
-)
 
 
 @dataclass

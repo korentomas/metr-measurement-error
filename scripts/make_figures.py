@@ -12,21 +12,20 @@ README's Results section embeds:
   3. outlier_pull.png       -- how far the Normal vs Student-t fit pulls the
                                latent log_L of the worst outlier tasks away
                                from their observed median duration.
-  4. sbc_ranks.png          -- SBC rank histograms for 3 representative
-                               hyperparameters (uniformity check).
-  5. stacking_weights.png   -- PSIS-LOO stacking weights across the 4 trend
-                               shapes.
-  6. doubling_time_density.png -- posterior density of ln(2)/slope_now
+  4. doubling_time_density.png -- posterior density of ln(2)/slope_now
                                ("doubling time now"), per trend shape plus
                                the stacked mixture, cf. Moss's
                                fig-doubling-time.
-  7. duration_dist_comparison.png -- pooled within-task log-residuals
+  5. duration_dist_comparison.png -- pooled within-task log-residuals
                                (real data) vs the log-normal, Student-t, and
                                Weibull-implied residual densities, showing
                                why the Weibull loses the PSIS-LOO comparison.
-  8. difficulty_residual.png -- posterior difficulty multiplier exp(eps_i)
+  6. difficulty_residual.png -- posterior difficulty multiplier exp(eps_i)
                                vs task length, with +-1/2 sigma bands: our
                                version of Moss's fig-difficulty-variation.
+
+SBC rank histograms and a stacking-weight bar chart are deliberately not
+generated (docs/results.md explains why they aren't embedded).
 
 Style deliberately follows Jonas Moss's own figures
 (metr-stats/scripts/make_figures.py): plain matplotlib defaults, shaded
@@ -41,23 +40,19 @@ from __future__ import annotations
 
 import gc
 import json
-import sys
 from collections import defaultdict
 from datetime import date
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import arviz as az
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 
-from models.data_prep import DEFAULT_RELEASE_DATES, RELEASE_DATE_OVERRIDES, load_model_data
+from metr_measurement_error.data_prep import RELEASE_DATE_OVERRIDES, load_model_data
+from metr_measurement_error.paths import DEFAULT_RELEASE_DATES, FIGURES_DIR, PROCESSED_DATA
 
-ROOT = Path(__file__).parent.parent
-OUT = ROOT / "outputs" / "figures"
-DATA_PATH = ROOT / "data" / "processed" / "runs_filtered.parquet"
+OUT = FIGURES_DIR
+DATA_PATH = PROCESSED_DATA
 
 plt.rcParams.update(
     {
@@ -89,7 +84,7 @@ SHAPE_FITS = {
 
 def _shape_f_t(shape: str, post, t_grid: np.ndarray):
     """Reconstruct f_t(t_grid) (log-minutes) from a fitted posterior's own
-    parameters, following the mean functions in models/time_horizon_model.py
+    parameters, following the mean functions in metr_measurement_error/model.py
     exactly (one branch per shape)."""
     beta0 = post["beta0"].stack(s=("chain", "draw")).values
     if shape == "linear":
@@ -191,8 +186,8 @@ def _apply_minute_duration_ticks(ax, y_values_minutes: np.ndarray) -> None:
 
 
 # Frontier models to annotate directly on the horizon-trend plot, mapping the
-# internal alias (see models/data_prep.py RELEASE_DATE_OVERRIDES) to a
-# recognizable display name.
+# internal alias (see metr_measurement_error.data_prep RELEASE_DATE_OVERRIDES)
+# to a recognizable display name.
 FRONTIER_LABELS = {
     "claude_opus_4_6_inspect": "Claude Opus 4.6",
     "flamingo_2": "GPT-5.3-Codex",
@@ -480,31 +475,7 @@ def fig_outlier_pull(data) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 4. SBC rank histograms (representative sample)
-# ---------------------------------------------------------------------------
-def fig_sbc_ranks() -> None:
-    d = np.load(ROOT / "outputs" / "sbc_results.npz")
-    params = ["beta1", "sigma_eps", "sigma_base"]
-    fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.6), sharey=True)
-    n_reps = len(d["rank_beta1"])
-    n_bins = 10
-    expected = n_reps / n_bins
-    for ax, p in zip(axes, params):
-        ranks = d[f"rank_{p}"]
-        ax.hist(ranks, bins=np.linspace(0, 1, n_bins + 1), color="tab:blue", edgecolor="white")
-        ax.axhline(expected, color="black", ls="--", lw=1)
-        ax.set_title(p)
-        ax.set_xlabel("normalized rank")
-    axes[0].set_ylabel("count")
-    fig.suptitle("SBC rank histograms (50 reps; flat = calibrated)")
-    fig.tight_layout()
-    fig.savefig(OUT / "sbc_ranks.png")
-    plt.close(fig)
-    print("wrote", OUT / "sbc_ranks.png")
-
-
-# ---------------------------------------------------------------------------
-# 5. Stacking weights
+# 4. Stacking weights (feeds the doubling-time mixture)
 # ---------------------------------------------------------------------------
 def _compute_stacking_weights() -> dict[str, float]:
     fits = {name: OUT.parent / fname for name, (fname, _, _) in SHAPE_FITS.items()}
@@ -518,24 +489,8 @@ def _compute_stacking_weights() -> dict[str, float]:
     return cmp["weight"].to_dict()
 
 
-def fig_stacking_weights(weights: dict[str, float]) -> None:
-    order = ["kink", "linear", "superexp", "logistic"]
-    w = [weights[o] for o in order]
-    fig, ax = plt.subplots(figsize=(5.5, 4))
-    ax.bar(order, w, color="tab:blue", width=0.6)
-    for i, wi in enumerate(w):
-        ax.text(i, wi + 0.01, f"{wi:.2f}", ha="center")
-    ax.set_ylabel("Stacking weight")
-    ax.set_title("Bayesian stacking weights across trend shapes")
-    ax.set_ylim(0, 1.0)
-    fig.tight_layout()
-    fig.savefig(OUT / "stacking_weights.png")
-    plt.close(fig)
-    print("wrote", OUT / "stacking_weights.png")
-
-
 # ---------------------------------------------------------------------------
-# 6. Duration-likelihood comparison: real residuals vs the three fitted dists
+# 5. Duration-likelihood comparison: real residuals vs the three fitted dists
 # ---------------------------------------------------------------------------
 def fig_duration_dist_comparison(data) -> None:
     from scipy import stats
@@ -590,7 +545,7 @@ def fig_duration_dist_comparison(data) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 7. Difficulty residual (eps_i) vs task length -- our version of Moss's fig 2
+# 6. Difficulty residual (eps_i) vs task length -- our version of Moss's fig 2
 # ---------------------------------------------------------------------------
 def fig_difficulty_residual(data) -> None:
     idata = az.from_netcdf(OUT.parent / "fit_linear_robust.nc")
@@ -661,11 +616,11 @@ def fig_difficulty_residual(data) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 8. Doubling-time posterior density, per shape + stacked mixture
+# 7. Doubling-time posterior density, per shape + stacked mixture
 #    (cf. Moss's fig-doubling-time, extended to all four shapes plus the
 #    stacked combination, since here doubling time isn't only defined for
 #    the linear shape -- slope_now gives a "doubling time now" for any of
-#    them, see models/time_horizon_model.py).
+#    them, see metr_measurement_error/model.py).
 # ---------------------------------------------------------------------------
 def fig_doubling_time_density(weights: dict[str, float]) -> None:
     from scipy.stats import gaussian_kde
@@ -741,9 +696,7 @@ def main() -> None:
     fig_horizon_trend(data, dates)
     fig_ppc(data)
     fig_outlier_pull(data)
-    fig_sbc_ranks()
     weights = _compute_stacking_weights()
-    fig_stacking_weights(weights)
     fig_doubling_time_density(weights)
     fig_duration_dist_comparison(data)
     fig_difficulty_residual(data)

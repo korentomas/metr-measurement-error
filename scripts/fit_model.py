@@ -16,21 +16,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from pathlib import Path
-
-# Allow running as `uv run python scripts/fit_model.py` from the repo root
-# without needing PYTHONPATH set manually.
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import arviz as az
 import pymc as pm
 
-from models.data_prep import load_model_data
-from models.time_horizon_model import build_model
+from metr_measurement_error.data_prep import load_model_data
+from metr_measurement_error.model import build_model
+from metr_measurement_error.paths import OUTPUTS_DIR, PROCESSED_DATA
 
-DEFAULT_DATA = str(Path(__file__).parent.parent / "data" / "processed" / "runs_filtered.parquet")
+DEFAULT_DATA = str(PROCESSED_DATA)
 
 
 def main() -> None:
@@ -106,9 +102,7 @@ def main() -> None:
             suffix += "_sota"
         if args.cut_estimate_feedback:
             suffix += "_cut"
-        args.out = str(
-            Path(__file__).parent.parent / "outputs" / f"fit_{args.shape}{suffix}.nc"
-        )
+        args.out = str(OUTPUTS_DIR / f"fit_{args.shape}{suffix}.nc")
 
     print(f"Loading data from {args.data} ...")
     data = load_model_data(args.data, sota_only=args.sota_only)

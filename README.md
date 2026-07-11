@@ -19,21 +19,25 @@ Then, from inside this repo:
 
 ```
 uv sync
-uv run python data/load_runs.py
+uv run python scripts/load_runs.py
 ```
+
+(`uv sync` also installs this repo's own package, `metr_measurement_error`,
+editable into `.venv`, which is what lets every script below run without any
+PYTHONPATH setup.)
 
 ## Repo layout
 
 ```
-data/
-  load_runs.py          # filters runs.jsonl down to human timing observations
-  processed/             # output of load_runs.py (gitignored)
-models/
+src/metr_measurement_error/  # the installable package (uv sync installs it editable)
+  paths.py               # repo-root-relative path constants (data, outputs, siblings)
+  load_runs.py           # filters runs.jsonl down to human timing observations
   data_prep.py           # assembles filtered human data + full runs.jsonl + release
                          # dates into the arrays the PyMC model needs
-  time_horizon_model.py  # pm.Model builder: measurement layer + IRT layer + trend
+  model.py               # pm.Model builder: measurement layer + IRT layer + trend
                          # (4 trend shapes, optional Student-t measurement layer)
 scripts/
+  load_runs.py           # CLI for the loader; writes data/processed/runs_filtered.parquet
   fit_model.py           # runnable fit script (nutpie, falls back to PyMC NUTS);
                          # --shape {linear,kink,superexp,logistic}, --robust,
                          # --log-likelihood (pointwise, for stacking),
@@ -45,7 +49,10 @@ scripts/
   sbc.py                 # reduced-scale simulation-based calibration
   stack_shapes.py        # PSIS-LOO + Bayesian stacking across the 4 shapes
   make_figures.py        # generates outputs/figures/*.png from the fitted .nc files
-outputs/                 # saved InferenceData (.nc), gitignored
+  estimate_feedback_diagnostic.py  # measures IRT->log_L feedback on estimate-only tasks
+data/processed/          # output of scripts/load_runs.py (committed, pins the snapshot)
+outputs/                 # saved InferenceData (.nc), attached to the GitHub
+                         # Release (see "Fitted posteriors" below)
 outputs/figures/         # generated plots (committed, see docs/results.md)
 docs/
   results.md             # full results: every number and plot
@@ -62,14 +69,14 @@ people who attempted (or, for a few tasks, estimated) each task's
 duration. Every other row is a model's own run carrying that task's
 human-timing metadata along for reference.
 
-`data/load_runs.py` filters to:
+`scripts/load_runs.py` filters to:
 
 ```
 model == "human"  AND  score_binarized == 1  AND  completed_at > 0
 ```
 
 On the current snapshot this yields 554 rows / 164 distinct tasks (525
-`human_source == "baseline"`, 29 `"estimate"`). `models/data_prep.py` then
+`human_source == "baseline"`, 29 `"estimate"`). `data_prep.py` then
 builds the observation set from this. Two properties of the data shape
 the observation model (both verified against the snapshot):
 
@@ -95,7 +102,7 @@ budget-limited working times; only the annotation is used for them.
 Run it:
 
 ```
-uv run python data/load_runs.py
+uv run python scripts/load_runs.py
 ```
 
 ```
@@ -107,19 +114,19 @@ Wrote filtered data to data/processed/runs_filtered.parquet
 
 Censoring note: the v2 spec calls for right-censoring duration observations
 at `time_limit` for RE-Bench-style runs that stack at the limit, and the
-`pm.Censored` branch in `time_horizon_model.py` implements it. In the
+`pm.Censored` branch in `model.py` implements it. In the
 current `runs.jsonl` snapshot, `time_limit` is always `0` for
 `model == "human"` rows (that field is populated for agent compute
 budgets), so no row is censored; the branch activates automatically if a
 future data pull includes time-limited human runs.
 
-`models/data_prep.py` additionally pulls:
+`data_prep.py` additionally pulls:
 - IRT counts: for every (model, task) pair among the 228 tasks (all
   non-human, non-cloned models), attempt/success counts aggregated from the
   full `runs.jsonl` (4,523 (model,task) rows across 20 models on this
   snapshot).
 - Release dates: from `../metr-stats/data/release_dates.json`, plus
-  overrides in `models/data_prep.py` for the two models missing there
+  overrides in `data_prep.py` for the two models missing there
   (`flamingo_2` == GPT-5.3-Codex and `claude_opus_4_6_inspect`, both
   2026-02-05, sourced from METR's TH1.1 `logistic_fits/headline.csv` via
   the runs.jsonl `alias` column). All 20 models are dated and participate
@@ -128,8 +135,8 @@ future data pull includes time-limited human runs.
 
 ## Model
 
-See the docstring at the top of `models/time_horizon_model.py` for the full
-spec. This extends Moss's 2PL model with a residual-difficulty
+See the docstring at the top of `src/metr_measurement_error/model.py` for the
+full spec. This extends Moss's 2PL model with a residual-difficulty
 term, a different identification fix suited to our difficulty scale, and
 a per-model random effect on ability.
 
@@ -170,6 +177,18 @@ timed baseline runs. The `task (228)` and `model (20)` plates show which
 latents repeat per task and per model.
 
 ![Model graph](outputs/figures/model_graph.png)
+
+## Fitted posteriors
+
+The fitted `.nc` files behind every number in `docs/results.md` are attached
+to the [`fits-v1` GitHub Release](https://github.com/korentomas/metr-measurement-error/releases/tag/fits-v1)
+(~450-500MB each, too large for git). To use them without refitting anything:
+
+```
+gh release download fits-v1 --dir outputs
+```
+
+With those in place, every analysis/figure script below runs as-is.
 
 ## Running
 

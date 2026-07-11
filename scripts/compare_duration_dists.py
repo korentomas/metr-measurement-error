@@ -25,20 +25,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import arviz as az
 import numpy as np
 import pymc as pm
 import xarray as xr
 
-from models.data_prep import load_model_data
-from models.time_horizon_model import build_model
+from metr_measurement_error.data_prep import load_model_data
+from metr_measurement_error.model import build_model
+from metr_measurement_error.paths import PROCESSED_DATA
 
-DEFAULT_DATA = str(Path(__file__).parent.parent / "data" / "processed" / "runs_filtered.parquet")
+DEFAULT_DATA = str(PROCESSED_DATA)
 
 
 def main() -> None:

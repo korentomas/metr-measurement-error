@@ -25,19 +25,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 import time
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import arviz as az
 import numpy as np
 import pymc as pm
 from scipy import stats
 
-from models.data_prep import ModelData
-from models.time_horizon_model import build_model
+from metr_measurement_error.data_prep import ModelData
+from metr_measurement_error.model import build_model
+from metr_measurement_error.paths import OUTPUTS_DIR
 
 PARAMS = [
     "mu_L", "sigma_L", "sigma_base", "sigma_est",
@@ -112,7 +109,7 @@ def main() -> None:
     parser.add_argument("--thin-to", type=int, default=100,
                         help="Thin posterior to this many draws for rank stats.")
     parser.add_argument("--seed", type=int, default=20260706)
-    parser.add_argument("--out", default=str(Path(__file__).parent.parent / "outputs" / "sbc_results.npz"))
+    parser.add_argument("--out", default=str(OUTPUTS_DIR / "sbc_results.npz"))
     args = parser.parse_args()
 
     design = make_design(n_tasks=args.n_tasks, n_models=args.n_models, seed=args.seed)

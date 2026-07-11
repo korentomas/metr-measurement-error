@@ -9,11 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-# Generated data / model outputs (regenerate via data/load_runs.py and scripts/fit_model.py)
-data/processed/
-outputs/*
-!outputs/figures/
-!outputs/figures/*.png
-
-# Internal debugging log, not part of the public repo
-docs/debugging-journal.md
+# Fitted posteriors are too large for git (~450-500MB each; GitHub blocks
+# files >100MB). They're attached as GitHub Release assets instead -- see
+# "Fitted posteriors" in the README.
+outputs/fit_*.nc

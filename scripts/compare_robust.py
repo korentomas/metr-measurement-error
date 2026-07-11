@@ -17,18 +17,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from collections import defaultdict
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import arviz as az
 import numpy as np
 
-from models.data_prep import load_model_data
+from metr_measurement_error.data_prep import load_model_data
+from metr_measurement_error.paths import PROCESSED_DATA
 
-DEFAULT_DATA = str(Path(__file__).parent.parent / "data" / "processed" / "runs_filtered.parquet")
+DEFAULT_DATA = str(PROCESSED_DATA)
 
 
 def main() -> None:
@@ -80,7 +77,7 @@ def main() -> None:
     logL_n = id_n.posterior["log_L"]
     logL_r = id_r.posterior["log_L"]
     for dev, t, obs_med, n in devs[:6]:
-        ln = logL_n.isel(log_L_dim_0=t).values.ravel() if "log_L_dim_0" in logL_n.dims else logL_n.sel(task=data.task_ids[t]).values.ravel()
+        ln = logL_n.sel(task=data.task_ids[t]).values.ravel()
         lr = logL_r.sel(task=data.task_ids[t]).values.ravel()
         print(
             f"{data.task_ids[t]:50s} {n:3d} {obs_med:8.2f} "

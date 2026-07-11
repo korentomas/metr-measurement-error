@@ -22,10 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import arviz as az
 import numpy as np

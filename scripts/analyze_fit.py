@@ -13,23 +13,20 @@ Reports:
      four trend shapes, not just linear).
 
 Usage:
-    uv run python scripts/analyze_fit.py --fit outputs/fit_linear_v3.nc
+    uv run python scripts/analyze_fit.py --fit outputs/fit_linear_robust.nc
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import arviz as az
 import numpy as np
 
-from models.data_prep import load_model_data
+from metr_measurement_error.data_prep import load_model_data
+from metr_measurement_error.paths import PROCESSED_DATA
 
-DEFAULT_DATA = str(Path(__file__).parent.parent / "data" / "processed" / "runs_filtered.parquet")
+DEFAULT_DATA = str(PROCESSED_DATA)
 
 
 def main() -> None:
