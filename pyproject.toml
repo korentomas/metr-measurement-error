@@ -21,3 +21,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/metr_measurement_error"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["src"]
+# PyMC/PyTensor/ArviZ are pervasively dynamic (InferenceData groups are
+# setattr'd at runtime, pytensor Variables define operators dynamically,
+# re-exports lack __all__), so static type checking is all false positives
+# here. Import resolution, completion, and hover still work.
+typeCheckingMode = "off"

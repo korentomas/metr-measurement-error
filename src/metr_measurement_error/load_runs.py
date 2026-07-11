@@ -38,6 +38,8 @@ The CLI wrapper lives in scripts/load_runs.py.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 REQUIRED_COLUMNS = [
