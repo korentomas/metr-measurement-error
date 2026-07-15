@@ -1,5 +1,10 @@
-"""Reduced-scale simulation-based calibration (SBC) for the linear-shape
-measurement-error time-horizon model.
+"""Reduced-scale simulation-based calibration (SBC) for the
+measurement-error time-horizon model, any shape / duration likelihood.
+
+Defaults reproduce the original linear + Normal run; pass --shape kink
+--robust --sigma-est-median 1.25 to calibrate the actual headline
+configuration (the kink shape drives the stacked headline and its delta/t_k
+and the Student-t nu were previously never rank-checked -- red-team #6).
 
 Procedure (Talts et al. 2018, reduced):
   1. Build a synthetic-design ModelData at reduced scale (default 50 tasks,
@@ -39,10 +44,19 @@ from scipy import stats
 from models.data_prep import ModelData
 from models.time_horizon_model import build_model
 
-PARAMS = [
+BASE_PARAMS = [
     "mu_L", "sigma_L", "sigma_base", "sigma_est",
     "sigma_a", "sigma_eps", "beta0", "beta1", "sigma_u",
 ]
+# Shape-specific trend parameters, ranked in addition to BASE_PARAMS so SBC
+# covers the actual headline configuration (the kink shape drives the stacked
+# headline, and its delta/t_k were previously never rank-checked).
+SHAPE_PARAMS = {
+    "linear": [],
+    "kink": ["delta", "t_k"],
+    "superexp": ["beta2"],
+    "logistic": ["h", "t0", "s"],
+}
 
 
 def make_design(
@@ -105,6 +119,11 @@ def main() -> None:
     parser.add_argument("--n-reps", type=int, default=25)
     parser.add_argument("--n-tasks", type=int, default=50)
     parser.add_argument("--n-models", type=int, default=8)
+    parser.add_argument("--shape", choices=list(SHAPE_PARAMS), default="linear")
+    parser.add_argument("--robust", action="store_true",
+                        help="Student-t baseline layer (adds nu to the ranked params).")
+    parser.add_argument("--duration-dist", choices=["lognormal", "studentt", "weibull"], default=None)
+    parser.add_argument("--sigma-est-median", type=float, default=1.25)
     parser.add_argument("--tune", type=int, default=800)
     parser.add_argument("--draws", type=int, default=500)
     parser.add_argument("--chains", type=int, default=2)
@@ -115,15 +134,24 @@ def main() -> None:
     parser.add_argument("--out", default=str(Path(__file__).parent.parent / "outputs" / "sbc_results.npz"))
     args = parser.parse_args()
 
+    duration_dist = args.duration_dist or ("studentt" if args.robust else "lognormal")
+    params = list(BASE_PARAMS) + SHAPE_PARAMS[args.shape]
+    if duration_dist == "studentt":
+        params.append("nu")
+    build_kw = dict(shape=args.shape, duration_dist=duration_dist,
+                    sigma_est_median=args.sigma_est_median)
+
     design = make_design(n_tasks=args.n_tasks, n_models=args.n_models, seed=args.seed)
     print(
         f"SBC design: {design.n_tasks} tasks, {design.n_models} models, "
         f"{len(design.log_dur)} timing obs ({design.is_estimate.sum()} estimate-only), "
         f"{len(design.n_attempts)} IRT cells x {design.n_attempts[0]} attempts"
     )
+    print(f"SBC config: shape={args.shape}, duration_dist={duration_dist}, "
+          f"sigma_est_median={args.sigma_est_median}; ranking {params}")
 
     # --- Prior-predictive simulation (exactly the model's own prior) ---
-    sim_model = build_model(design, shape="linear")
+    sim_model = build_model(design, **build_kw)
     with sim_model:
         prior = pm.sample_prior_predictive(
             samples=args.n_reps, random_seed=args.seed
@@ -131,13 +159,13 @@ def main() -> None:
     pp = prior.prior
     obs = prior.prior_predictive
 
-    ranks = {p: [] for p in PARAMS}
-    cover50 = {p: [] for p in PARAMS}
-    cover90 = {p: [] for p in PARAMS}
+    ranks = {p: [] for p in params}
+    cover50 = {p: [] for p in params}
+    cover90 = {p: [] for p in params}
     diags = []
 
     for r in range(args.n_reps):
-        true = {p: float(pp[p].isel(chain=0, draw=r)) for p in PARAMS}
+        true = {p: float(pp[p].isel(chain=0, draw=r)) for p in params}
 
         rep = make_design(n_tasks=args.n_tasks, n_models=args.n_models, seed=args.seed)
         base_sim = obs["dur_base_obs"].isel(chain=0, draw=r).values
@@ -146,7 +174,7 @@ def main() -> None:
         rep.n_successes = obs["successes"].isel(chain=0, draw=r).values.astype(int)
 
         t0 = time.time()
-        model = build_model(rep, shape="linear")
+        model = build_model(rep, **build_kw)
         with model:
             try:
                 idata = pm.sample(
@@ -165,12 +193,12 @@ def main() -> None:
 
         ndiv = int(idata.sample_stats["diverging"].sum())
         rhat = float(
-            az.rhat(idata, var_names=PARAMS).to_array().max()
+            az.rhat(idata, var_names=params).to_array().max()
         )
         elapsed = time.time() - t0
         diags.append((r, ndiv, rhat, elapsed, "ok"))
 
-        for p in PARAMS:
+        for p in params:
             draws = idata.posterior[p].values.ravel()
             # Thin to reduce autocorrelation in the rank statistic.
             step = max(1, len(draws) // args.thin_to)
@@ -190,7 +218,7 @@ def main() -> None:
     n_ok = sum(1 for d in diags if d[4] == "ok")
     print(f"\n=== SBC summary: {n_ok}/{args.n_reps} reps fit successfully ===")
     print(f"{'param':12s} {'mean rank':>9s} {'KS p':>7s} {'cov50':>6s} {'cov90':>6s}")
-    for p in PARAMS:
+    for p in params:
         u = np.array(ranks[p])
         if len(u) == 0:
             continue
@@ -206,7 +234,7 @@ def main() -> None:
 
     np.savez(
         args.out,
-        **{f"rank_{p}": np.array(ranks[p]) for p in PARAMS},
+        **{f"rank_{p}": np.array(ranks[p]) for p in params},
         diags=np.array([(d[0], d[1], d[2], d[3]) for d in diags if d[4] == "ok"]),
     )
     print(f"Saved to {args.out}")
