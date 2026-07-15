@@ -80,7 +80,8 @@ def _log_minutes(minutes: pd.Series) -> np.ndarray:
 
 
 def build_measurement_data(
-    runs_filtered: pd.DataFrame, runs_raw: pd.DataFrame
+    runs_filtered: pd.DataFrame, runs_raw: pd.DataFrame,
+    include_human_failures: bool = False,
 ) -> tuple[list[str], dict]:
     """Build the per-observation duration arrays and the task_id -> index map.
 
@@ -154,16 +155,54 @@ def build_measurement_data(
     log_dur_est = _log_minutes(est_minutes)
     task_idx_est = np.array([task_index[t] for t in est_tasks], dtype=int)
 
-    # --- Stack: baseline obs first, then estimate obs ---
-    log_dur = np.concatenate([log_dur_base, log_dur_est])
-    task_idx_obs = np.concatenate([task_idx_base, task_idx_est])
-    is_estimate = np.concatenate(
-        [np.zeros(len(log_dur_base), dtype=bool), np.ones(len(log_dur_est), dtype=bool)]
-    )
-    is_censored = np.concatenate(
-        [is_censored_base, np.zeros(len(log_dur_est), dtype=bool)]
-    )
-    censor_log_time = np.concatenate([censor_base, np.zeros(len(log_dur_est))])
+    # --- Failed baseline human runs as right-censored observations ---
+    # Survivorship: the score_binarized==1 filter drops every FAILED human
+    # attempt, so log_L is inferred from successful humans only. Failures
+    # cluster on hard/long tasks (failed baseline median wall-time ~110-150
+    # min vs ~5 min for successes), biasing the length scale downward exactly
+    # where it matters. A failed attempt that spent wall-time w is evidence
+    # that a successful completion would have taken *longer* than w, i.e. a
+    # right-censored observation of the completion time at log(w). This is
+    # self-weighting: a give-up at 7 min contributes P(T>7) ~ 1 (nearly
+    # vacuous), while a genuine hard-task failure at 480 min contributes a
+    # strong upward pull on log_L. (Assumption: failure ~ "would need more
+    # time"; the ~47% of failures shorter than the task's own success median
+    # are the give-ups that the survival function correctly down-weights.)
+    if include_human_failures:
+        hf = runs_raw[
+            (runs_raw["model"] == "human")
+            & (runs_raw["score_binarized"] == 0)
+            & (runs_raw["human_source"] == "baseline")
+            & (runs_raw["cloned"].fillna(0) == 0)
+            & runs_raw["task_id"].isin(task_set)
+        ].copy()
+        hf_started = pd.to_numeric(hf["started_at"], errors="coerce").fillna(0.0)
+        hf_completed = pd.to_numeric(hf["completed_at"], errors="coerce")
+        hf["wall_minutes"] = (hf_completed - hf_started) / 1000.0 / 60.0
+        hf = hf[hf["wall_minutes"] > 0]
+        log_dur_fail = _log_minutes(hf["wall_minutes"])
+        task_idx_fail = hf["task_id"].map(task_index).to_numpy(dtype=int)
+        n_fail = len(log_dur_fail)
+    else:
+        log_dur_fail = np.array([], dtype=float)
+        task_idx_fail = np.array([], dtype=int)
+        n_fail = 0
+
+    # --- Stack: uncensored baseline, then censored failures, then estimate ---
+    log_dur = np.concatenate([log_dur_base, log_dur_fail, log_dur_est])
+    task_idx_obs = np.concatenate([task_idx_base, task_idx_fail, task_idx_est])
+    is_estimate = np.concatenate([
+        np.zeros(len(log_dur_base), dtype=bool),
+        np.zeros(n_fail, dtype=bool),
+        np.ones(len(log_dur_est), dtype=bool),
+    ])
+    is_censored = np.concatenate([
+        is_censored_base,
+        np.ones(n_fail, dtype=bool),           # failures are right-censored
+        np.zeros(len(log_dur_est), dtype=bool),
+    ])
+    # right-censor each failure at its own log wall-time
+    censor_log_time = np.concatenate([censor_base, log_dur_fail, np.zeros(len(log_dur_est))])
 
     return task_ids, {
         "log_dur": log_dur,
@@ -299,6 +338,7 @@ def load_model_data(
     runs_raw_path: str | Path = DEFAULT_RUNS_JSONL,
     release_dates_path: str | Path = DEFAULT_RELEASE_DATES,
     sota_only: bool = False,
+    include_human_failures: bool = False,
 ) -> ModelData:
     """Assemble the ModelData container.
 
@@ -320,7 +360,9 @@ def load_model_data(
             (runs_raw["model"] == "human") | runs_raw["model"].isin(sota)
         ]
 
-    task_ids, meas = build_measurement_data(runs_filtered, runs_raw)
+    task_ids, meas = build_measurement_data(
+        runs_filtered, runs_raw, include_human_failures=include_human_failures
+    )
     task_index = {t: i for i, t in enumerate(task_ids)}
 
     model_names, irt = build_irt_counts(runs_raw, task_ids, task_index)

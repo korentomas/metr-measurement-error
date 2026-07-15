@@ -88,6 +88,19 @@ def main() -> None:
         "lengths. Baseline-informed tasks are unchanged.",
     )
     parser.add_argument(
+        "--heteroscedastic",
+        action="store_true",
+        help="Model baseline measurement noise as length-dependent: "
+        "sigma_base_i = sigma_base * exp(gamma_sig * (log_L_i - mu_L)). "
+        "gamma_sig=0 nests the homoscedastic model.",
+    )
+    parser.add_argument(
+        "--include-human-failures",
+        action="store_true",
+        help="Add failed baseline human runs as right-censored duration "
+        "observations (survivorship correction on log_L).",
+    )
+    parser.add_argument(
         "--log-likelihood",
         action="store_true",
         help="Compute pointwise log-likelihood of `successes` (stacking) and "
@@ -106,12 +119,20 @@ def main() -> None:
             suffix += "_sota"
         if args.cut_estimate_feedback:
             suffix += "_cut"
+        if args.heteroscedastic:
+            suffix += "_het"
+        if args.include_human_failures:
+            suffix += "_hf"
         args.out = str(
             Path(__file__).parent.parent / "outputs" / f"fit_{args.shape}{suffix}.nc"
         )
 
     print(f"Loading data from {args.data} ...")
-    data = load_model_data(args.data, sota_only=args.sota_only)
+    data = load_model_data(
+        args.data,
+        sota_only=args.sota_only,
+        include_human_failures=args.include_human_failures,
+    )
     print(
         f"  {data.n_tasks} tasks, {len(data.log_dur)} human-timing obs "
         f"({data.is_estimate.sum()} estimate-only), {data.n_models} models, "
@@ -124,6 +145,7 @@ def main() -> None:
         duration_dist=duration_dist,
         sigma_est_median=args.sigma_est_median,
         cut_estimate_feedback=args.cut_estimate_feedback,
+        heteroscedastic=args.heteroscedastic,
     )
     print(
         f"Model built (shape={args.shape}, duration_dist={duration_dist}, "

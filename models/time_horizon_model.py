@@ -72,6 +72,23 @@ Options on top of the base spec (all actually implemented, not stubs):
   tasks are untouched. eps_i stays free, so residual difficulty is still
   estimated; only the length channel is cut.
 
+- `heteroscedastic=True` lets the baseline measurement noise depend on task
+  length: sigma_base_i = sigma_base * exp(gamma_sig * (log_L_i - mu_L)). The
+  within-task sd of log wall-time rises with length in the real data (corr
+  ~+0.31; short-task median log-sd ~0.28 vs long-task ~0.57), which a single
+  global sigma_base cannot represent. gamma_sig ~ Normal(0, 0.5) and
+  gamma_sig=0 nests the homoscedastic model. Applies to the lognormal and
+  studentt duration layers (the Weibull carries its spread in alpha_w).
+
+- Failed baseline human runs (loaded via
+  `load_model_data(..., include_human_failures=True)`) enter as right-
+  censored duration observations at their own log wall-time, through the same
+  `pm.Censored` path as time-limit censoring. This is the survivorship
+  correction: the default score_binarized==1 filter keeps only successful
+  human runs, so log_L is inferred from a length distribution truncated to
+  "fast enough to succeed"; a failure that ran w minutes says the completion
+  time exceeds w. Now supported under both the Normal and Student-t layers.
+
 - `shape` selects the ability-trend mean function f(t_m):
     "linear":  beta0 + beta1*t
     "kink":    beta0 + beta1*t + delta*softplus((t-t_k)/w)*w   (w=0.1yr,
@@ -108,6 +125,7 @@ def build_model(
     duration_dist: str | None = None,
     sigma_est_median: float = 1.25,
     cut_estimate_feedback: bool = False,
+    heteroscedastic: bool = False,
 ) -> pm.Model:
     if shape not in SHAPES:
         raise ValueError(f"shape must be one of {SHAPES}, got {shape!r}")
@@ -159,6 +177,25 @@ def build_model(
         # the Weibull the spread is carried by the shape parameter alpha_w.
         if duration_dist in ("lognormal", "studentt"):
             sigma_base = pm.HalfNormal("sigma_base", sigma=1.0)
+            # Heteroscedastic measurement noise: the within-task sd of log
+            # wall-time grows with task length in the real data (corr ~+0.31;
+            # short-task median log-sd ~0.28 vs long-task ~0.57). A single
+            # global sigma_base is misspecified -- it over-smooths short tasks
+            # and under-smooths long ones. Model the log measurement scale as
+            # linear in the (latent) log length: sigma_base_i = sigma_base *
+            # exp(gamma_sig * (log_L_i - mu_L)). gamma_sig = 0 recovers the
+            # homoscedastic model, so this nests the original. The prior is
+            # tight (Normal(0, 0.5)): over the observed ~7 log-unit length
+            # span, gamma_sig ~ 0.1 already doubles the noise end to end.
+            if heteroscedastic:
+                gamma_sig = pm.Normal("gamma_sig", mu=0.0, sigma=0.5)
+                sigma_base_task = pm.Deterministic(
+                    "sigma_base_task",
+                    sigma_base * pt.exp(gamma_sig * (log_L - mu_L)),
+                    dims="task",
+                )
+            else:
+                sigma_base_task = sigma_base
         # sigma_est gets a prior bounded away from zero (LogNormal) rather
         # than a HalfNormal. Each estimate-only task contributes a single
         # annotation, so the data cannot rule out sigma_est ~ 0; a
@@ -181,6 +218,15 @@ def build_model(
         # (sigma_est_median=0.8 reproduces it).
         sigma_est = pm.LogNormal("sigma_est", mu=np.log(sigma_est_median), sigma=0.5)
 
+        def sigma_for(idx: np.ndarray):
+            """Per-observation baseline noise scale: a task-indexed vector
+            under the heteroscedastic model, the scalar sigma_base otherwise."""
+            if duration_dist not in ("lognormal", "studentt"):
+                return None
+            if heteroscedastic:
+                return sigma_base_task[data.task_idx_obs[idx]]
+            return sigma_base
+
         if len(idx_base_obs) > 0:
             if duration_dist == "studentt":
                 # Heavy-tailed likelihood for real timed runs. nu ~ Gamma(2,
@@ -193,7 +239,7 @@ def build_model(
                     "dur_base_obs",
                     nu=nu,
                     mu=log_L[data.task_idx_obs[idx_base_obs]],
-                    sigma=sigma_base,
+                    sigma=sigma_for(idx_base_obs),
                     observed=data.log_dur[idx_base_obs],
                 )
             elif duration_dist == "weibull":
@@ -225,7 +271,7 @@ def build_model(
                 pm.Normal(
                     "dur_base_obs",
                     mu=log_L[data.task_idx_obs[idx_base_obs]],
-                    sigma=sigma_base,
+                    sigma=sigma_for(idx_base_obs),
                     observed=data.log_dur[idx_base_obs],
                 )
 
@@ -246,9 +292,12 @@ def build_model(
                     observed=np.exp(data.log_dur[idx_base_cens]),
                 )
             else:
-                base_dist = pm.Normal.dist(
-                    mu=log_L[data.task_idx_obs[idx_base_cens]], sigma=sigma_base
-                )
+                cens_mu = log_L[data.task_idx_obs[idx_base_cens]]
+                cens_sigma = sigma_for(idx_base_cens)
+                if duration_dist == "studentt":
+                    base_dist = pm.StudentT.dist(nu=nu, mu=cens_mu, sigma=cens_sigma)
+                else:
+                    base_dist = pm.Normal.dist(mu=cens_mu, sigma=cens_sigma)
                 pm.Censored(
                     "dur_base_censored",
                     base_dist,
