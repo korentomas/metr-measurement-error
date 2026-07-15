@@ -71,6 +71,14 @@ class ModelData:
     t_model: np.ndarray                 # (n_models,) centered/scaled release date (years)
     has_date: np.ndarray                # (n_models,) bool
 
+    # --- Optional task grouping (for structured residual difficulty eps) ---
+    # task_family[i] is the integer family code of task i (0..n_families-1),
+    # aligned with task_ids; family_names lists the family labels. None when
+    # the grouping isn't loaded (e.g. the synthetic SBC design), in which case
+    # the model falls back to the flat ZeroSumNormal eps.
+    task_family: np.ndarray | None = None      # (n_tasks,) int
+    family_names: list[str] | None = None      # length n_families
+
 
 def _log_minutes(minutes: pd.Series) -> np.ndarray:
     vals = minutes.to_numpy(dtype=float)
@@ -368,6 +376,17 @@ def load_model_data(
     model_names, irt = build_irt_counts(runs_raw, task_ids, task_index)
     t_model, has_date = build_theta_trend(model_names, release_dates_path)
 
+    # Task-family grouping (for structured eps): one family label per task,
+    # aligned with task_ids, from the runs.jsonl `task_family` column.
+    nonhuman = runs_raw[
+        (runs_raw["model"] != "human") & (runs_raw["cloned"].fillna(0) == 0)
+    ]
+    fam_by_task = nonhuman.groupby("task_id")["task_family"].first()
+    fam_labels = [str(fam_by_task.get(t, "unknown")) for t in task_ids]
+    family_names = sorted(set(fam_labels))
+    fam_index = {f: i for i, f in enumerate(family_names)}
+    task_family = np.array([fam_index[f] for f in fam_labels], dtype=int)
+
     return ModelData(
         n_tasks=len(task_ids),
         task_ids=task_ids,
@@ -384,4 +403,6 @@ def load_model_data(
         model_idx_irt=irt["model_idx_irt"],
         t_model=t_model,
         has_date=has_date,
+        task_family=task_family,
+        family_names=family_names,
     )

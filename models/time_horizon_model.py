@@ -89,6 +89,15 @@ Options on top of the base spec (all actually implemented, not stubs):
   "fast enough to succeed"; a failure that ran w minutes says the completion
   time exceeds w. Now supported under both the Normal and Student-t layers.
 
+- `eps_structure` controls the residual-difficulty term. "flat" (default) is
+  the original per-task ZeroSumNormal(sigma_eps). "family" decomposes it into
+  a task-family effect plus a within-family residual, eps_i = fam_eff[fam(i)]
+  + within_i (centered to keep the exact sum-to-zero identification), and
+  exposes sigma_eps_fam, sigma_eps_within, and eps_between_frac. It answers
+  how much of the ~8x residual-difficulty spread is predictable family
+  structure rather than irreducible per-task noise. Requires data.task_family
+  (loaded by load_model_data from the runs.jsonl `task_family` column).
+
 - `shape` selects the ability-trend mean function f(t_m):
     "linear":  beta0 + beta1*t
     "kink":    beta0 + beta1*t + delta*softplus((t-t_k)/w)*w   (w=0.1yr,
@@ -126,11 +135,16 @@ def build_model(
     sigma_est_median: float = 1.25,
     cut_estimate_feedback: bool = False,
     heteroscedastic: bool = False,
+    eps_structure: str = "flat",
 ) -> pm.Model:
     if shape not in SHAPES:
         raise ValueError(f"shape must be one of {SHAPES}, got {shape!r}")
     if robust not in (None, "studentt"):
         raise ValueError(f"robust must be None or 'studentt', got {robust!r}")
+    if eps_structure not in ("flat", "family"):
+        raise ValueError(f"eps_structure must be 'flat' or 'family', got {eps_structure!r}")
+    if eps_structure == "family" and data.task_family is None:
+        raise ValueError("eps_structure='family' requires data.task_family (load via load_model_data).")
     # `duration_dist` supersedes `robust` (kept for backwards compat):
     # "lognormal" = Normal on log(dur); "studentt" = Student-t on log(dur);
     # "weibull" = Weibull on the raw duration scale (Moss's suggestion).
@@ -153,6 +167,8 @@ def build_model(
         "task": data.task_ids,
         "model": data.model_names,
     }
+    if eps_structure == "family":
+        coords["family"] = data.family_names
 
     with pm.Model(coords=coords) as model:
         # ---- Measurement layer ----
@@ -330,9 +346,37 @@ def build_model(
         # data, and anchors would destroy that interpretation). Constraining
         # eps to sum to zero removes the ridge while keeping theta_m
         # directly interpretable as a log-minutes horizon.
-        sigma_eps = pm.HalfNormal("sigma_eps", sigma=0.5)
-        eps_raw = pm.ZeroSumNormal("eps_raw", sigma=1.0, dims="task")
-        eps = pm.Deterministic("eps", eps_raw * sigma_eps, dims="task")
+        if eps_structure == "family":
+            # Hierarchical residual difficulty: split eps into a family-level
+            # effect (some task families are systematically harder/easier than
+            # their length predicts) and a within-family residual. This asks
+            # how much of the ~8x "residual difficulty" (sigma_eps) is
+            # predictable structure vs genuinely irreducible per-task noise.
+            #   eps_i = fam_eff[fam(i)] + within_i,  then centered.
+            # Identification: the theta/eps shift ridge is broken only if the
+            # overall mean of eps is pinned to 0. ZeroSumNormal on family
+            # effects alone does not guarantee that (families differ in size),
+            # so we subtract the realized task-mean, enforcing exact
+            # sum-to-zero on the *total* eps -- the same constraint the flat
+            # ZeroSumNormal imposes, just on a decomposed effect.
+            sigma_eps_fam = pm.HalfNormal("sigma_eps_fam", sigma=0.5)
+            sigma_eps_within = pm.HalfNormal("sigma_eps_within", sigma=0.5)
+            fam_raw = pm.Normal("fam_raw", mu=0.0, sigma=1.0, dims="family")
+            within_raw = pm.Normal("within_raw", mu=0.0, sigma=1.0, dims="task")
+            fam_idx = pt.as_tensor_variable(data.task_family)
+            eps_unc = sigma_eps_fam * fam_raw[fam_idx] + sigma_eps_within * within_raw
+            eps = pm.Deterministic("eps", eps_unc - pt.mean(eps_unc), dims="task")
+            # Realized total spread, comparable to the flat model's sigma_eps,
+            # and the between-family share of the residual-difficulty variance.
+            pm.Deterministic("sigma_eps", pt.std(eps))
+            pm.Deterministic(
+                "eps_between_frac",
+                sigma_eps_fam**2 / (sigma_eps_fam**2 + sigma_eps_within**2),
+            )
+        else:
+            sigma_eps = pm.HalfNormal("sigma_eps", sigma=0.5)
+            eps_raw = pm.ZeroSumNormal("eps_raw", sigma=1.0, dims="task")
+            eps = pm.Deterministic("eps", eps_raw * sigma_eps, dims="task")
 
         # Cut-model variant: for estimate-only tasks, the IRT layer uses the
         # raw annotation as a fixed constant in place of the latent log_L,

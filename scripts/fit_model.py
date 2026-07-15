@@ -101,6 +101,14 @@ def main() -> None:
         "observations (survivorship correction on log_L).",
     )
     parser.add_argument(
+        "--eps-structure",
+        choices=["flat", "family"],
+        default="flat",
+        help="Residual-difficulty structure: 'flat' (ZeroSumNormal, default) "
+        "or 'family' (hierarchical: family effect + within-family residual, "
+        "decomposing sigma_eps into between/within components).",
+    )
+    parser.add_argument(
         "--log-likelihood",
         action="store_true",
         help="Compute pointwise log-likelihood of `successes` (stacking) and "
@@ -123,6 +131,8 @@ def main() -> None:
             suffix += "_het"
         if args.include_human_failures:
             suffix += "_hf"
+        if args.eps_structure == "family":
+            suffix += "_fameps"
         args.out = str(
             Path(__file__).parent.parent / "outputs" / f"fit_{args.shape}{suffix}.nc"
         )
@@ -146,6 +156,7 @@ def main() -> None:
         sigma_est_median=args.sigma_est_median,
         cut_estimate_feedback=args.cut_estimate_feedback,
         heteroscedastic=args.heteroscedastic,
+        eps_structure=args.eps_structure,
     )
     print(
         f"Model built (shape={args.shape}, duration_dist={duration_dist}, "
