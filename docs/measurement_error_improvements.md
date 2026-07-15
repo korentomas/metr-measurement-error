@@ -150,6 +150,21 @@ that drive the headline (`delta`, `t_k`) and the robust layer (`nu`) are
 well-calibrated. The headline configuration is now SBC-backed, not just the
 simplified stand-in.
 
+The **recommended** configuration (kink + Student-t + **heteroscedastic**)
+also passes, 40/40, with the new `gamma_sig` well-calibrated (mean rank
+0.513, KS p 0.94, cov50 0.53, cov90 0.90) — so adopting heteroscedasticity
+does not break calibration:
+
+```
+=== SBC (kink + robust + heteroscedastic): 40/40 reps fit ===
+param        mean rank    KS p  cov50  cov90
+sigma_eps        0.553   0.571   0.57   0.90
+delta            0.553   0.378   0.55   0.97
+t_k              0.495   0.942   0.53   0.97
+nu               0.482   0.830   0.45   0.97
+gamma_sig        0.513   0.942   0.53   0.90   <- new heteroscedastic param, calibrated
+```
+
 ---
 
 ## Recommended "best" measurement-error model
@@ -161,6 +176,8 @@ the headline, with **failed-run censoring reported as a sensitivity column**:
 uv run python scripts/fit_model.py --shape kink --robust --heteroscedastic \
     --log-likelihood --tune 2000 --draws 2000 --chains 4 --target-accept 0.95
 ```
+
+This configuration passes SBC (40/40, `gamma_sig` calibrated; §5).
 
 Rationale: heteroscedasticity is the one change the data decisively support
 (+14 elpd, P(gamma>0)=1) and it costs nothing in complexity or the headline;
@@ -177,8 +194,8 @@ the most reassuring result in the file.
 
 ## Open follow-ups
 
-- SBC the recommended `+heteroscedastic` config (add `--heteroscedastic`;
-  `gamma_sig` is already wired into the harness) and at full data scale.
+- SBC at full data scale (the passes above are reduced-scale, 50 tasks / 8
+  models, per Talts et al.'s reduced protocol).
 - Structured `eps` by `task_family` / `task_source` (79 families, 3 sources)
   to split `sigma_eps` into between- vs within-group and see how much of the
   "8×" is un-modelled rather than irreducible (red-team #7).
