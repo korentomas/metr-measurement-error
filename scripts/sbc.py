@@ -124,6 +124,8 @@ def main() -> None:
                         help="Student-t baseline layer (adds nu to the ranked params).")
     parser.add_argument("--duration-dist", choices=["lognormal", "studentt", "weibull"], default=None)
     parser.add_argument("--sigma-est-median", type=float, default=1.25)
+    parser.add_argument("--heteroscedastic", action="store_true",
+                        help="Heteroscedastic measurement layer (adds gamma_sig to ranked params).")
     parser.add_argument("--tune", type=int, default=800)
     parser.add_argument("--draws", type=int, default=500)
     parser.add_argument("--chains", type=int, default=2)
@@ -138,8 +140,11 @@ def main() -> None:
     params = list(BASE_PARAMS) + SHAPE_PARAMS[args.shape]
     if duration_dist == "studentt":
         params.append("nu")
+    if args.heteroscedastic:
+        params.append("gamma_sig")
     build_kw = dict(shape=args.shape, duration_dist=duration_dist,
-                    sigma_est_median=args.sigma_est_median)
+                    sigma_est_median=args.sigma_est_median,
+                    heteroscedastic=args.heteroscedastic)
 
     design = make_design(n_tasks=args.n_tasks, n_models=args.n_models, seed=args.seed)
     print(
