@@ -21,11 +21,18 @@ faithful anchor.
 | **Heteroscedastic measurement noise** | **adopt** | none (3.3 mo) | `gamma_sig = +0.103 [0.068, 0.138]`, P>0 = 1.00; **+14.2 duration-fit elpd** (dse 6.9) over homoscedastic; matches the raw data |
 | **Failed-run censoring (survivorship)** | **report as sensitivity** | none (3.3 mo) | lifts hard-task lengths ~11% where humans failed; but shifts the estimand and fits successes slightly worse |
 | **Report marginal (not just conditional) horizon** | **adopt in reporting** | n/a | 50% level & doubling-time are definition-robust; non-50% & extrapolations are not |
+| **Structured `eps` by task family** | **adopt** | **3.0 mo** (from 3.3) | **67%** of the "8×" residual difficulty is predictable family structure; +8.0 successes elpd; the one change that moves the trend |
 | Recompute per-task noise as a plug-in | rejected | — | discards real measurement uncertainty (~0.4 log-min) the layer exists to carry |
 
-Headline doubling time is **3.3 months under every measurement variant
-tried** — the trend is robust to how the timing noise is modelled. The wins
-are in *specification and honesty*, not in moving the number.
+Headline doubling time is **3.3 months under every measurement-*layer* variant
+tried** (heteroscedasticity, Student-t, failed-run censoring) — the trend is
+robust to how the timing *noise* is modelled. The one change that moves it is
+structuring the *difficulty* term `eps` (§6): 3.0 [2.5, 3.6] months. That is
+not a contradiction — it is the model's own logic. The IRT/trend layer is
+driven by `difficulty = log_L + eps`, and `eps` is the large, IRT-identified
+part while `log_L` is buffered behind it (red-team #2). So refinements to the
+*length* channel wash out, and the refinement to the *difficulty* channel is
+exactly the one that can, and does, sharpen the trend.
 
 ---
 
@@ -127,7 +134,55 @@ Practical upshot: keep quoting the 50% horizon and doubling time as-is;
 whenever a non-50% horizon or a threshold-crossing date is quoted, compute it
 marginally.
 
-## 5. Robustness: SBC on the actual headline configuration (red-team #6)
+## 5. Structured residual difficulty by task family (red-team #7)
+
+**Problem.** The flat model reports one `sigma_eps` (~2.2 log-min, ~8×) and
+treats *all* of it as irreducible "residual difficulty." But task length is a
+worse proxy for some task types than others, so an unknown share of that 8× is
+predictable structure, not noise.
+
+**Change.** Decompose `eps` hierarchically into a task-family effect and a
+within-family residual, `eps_i = fam_eff[fam(i)] + within_i`, centered to keep
+the exact sum-to-zero identification. `eps_structure='family'` exposes
+`sigma_eps_fam`, `sigma_eps_within`, and `eps_between_frac`. (79 families over
+228 tasks.)
+
+**Result — most of the "8×" is structure, not noise.**
+
+```
+sigma_eps_fam    (between-family): 2.24 [1.82, 2.71]
+sigma_eps_within (within-family):  1.58 [1.25, 1.93]   <- the ~irreducible part (~5x, not 8x)
+between-family variance share:     0.67 [0.53, 0.78]   <- ~67% is predictable family structure
+successes PSIS-LOO:  family -2688.5  vs  flat -2696.5   (+8.0, dse 4.0; weight 0.96 vs 0.04)
+```
+
+The family model fits the success data decisively better, and 67% of the
+residual-difficulty variance is between-family — i.e. a task-family covariate
+would capture two-thirds of what the flat model calls irreducible. The family
+effects are large and interpretable (log-min, "+" = harder than its length
+implies): `continue_pattern` **+4.7 (110×)**, `spn_cryptanalysis` +4.5,
+`implement_ace_oauth` +3.8 at the hard end; `file_selection` **−5.1 (0.01×)**,
+`arithmetic` −4.9, `alert_triage` −4.7 at the easy end — the mechanical-lookup
+vs sustained-reasoning split you would expect. 17 of the 42 multi-task
+families have effects whose 95% interval excludes zero.
+
+![Family eps decomposition](../outputs/figures/eps_family_decomposition.png)
+
+**This is the one refinement that moves the headline: doubling time 3.0 [2.5,
+3.6] months, vs the flat 3.3 [2.8, 4.1]** (overlapping, but a real shift). Why
+this change and not the measurement-layer ones? Because the trend is driven by
+`difficulty = log_L + eps`, and `eps` is the large IRT-identified part; pooling
+it by family sharpens the difficulty estimates the trend is read against, so
+the slope moves. (The flat single `sigma_eps` was also mildly *under*-stating
+the spread by shrinking 228 independent per-task effects; pooling within
+families de-shrinks them, which is why the total realized spread rises to 3.3
+even as the irreducible within-family part is only 1.6.) 0 divergences, R-hat
+1.006, ESS ~5500 — not a geometry artifact, and the priors (HalfNormal 0.5)
+are an order of magnitude below the posteriors, so not a prior artifact.
+
+`scripts/eps_decomposition.py` reproduces the numbers and the family ranking.
+
+## 6. Robustness: SBC on the actual headline configuration (red-team #6)
 
 The published SBC covered only the Normal/linear/reduced-scale model under the
 old `sigma_est` prior. `scripts/sbc.py` is now general; run on the **headline
@@ -169,36 +224,49 @@ gamma_sig        0.513   0.942   0.53   0.90   <- new heteroscedastic param, cal
 
 ## Recommended "best" measurement-error model
 
-**Student-t duration layer + heteroscedastic `sigma_base`**, kink trend for
-the headline, with **failed-run censoring reported as a sensitivity column**:
+**Student-t duration layer + heteroscedastic `sigma_base` + family-structured
+`eps`**, kink trend, with **failed-run censoring as a sensitivity column**:
 
 ```
 uv run python scripts/fit_model.py --shape kink --robust --heteroscedastic \
-    --log-likelihood --tune 2000 --draws 2000 --chains 4 --target-accept 0.95
+    --eps-structure family --log-likelihood \
+    --tune 2000 --draws 2000 --chains 4 --target-accept 0.95
 ```
 
-This configuration passes SBC (40/40, `gamma_sig` calibrated; §5).
+Heteroscedasticity passes SBC (40/40, `gamma_sig` calibrated; §6).
 
-Rationale: heteroscedasticity is the one change the data decisively support
-(+14 elpd, P(gamma>0)=1) and it costs nothing in complexity or the headline;
-the Student-t stays because it still helps once heteroscedasticity is in;
-censoring is the honest survivorship check but shifts the estimand, so it is a
-robustness column rather than the primary fit. And the reporting change —
-marginal horizons for any non-50% or extrapolated quantity — costs nothing and
-removes the one genuinely misleading comparison against METR.
+Rationale, in order of impact:
+- **Family-structured `eps`** is the most consequential change: it fits the
+  success data better (+8 elpd), reveals that ~⅔ of the residual difficulty is
+  predictable family structure rather than irreducible noise, and it is the
+  one refinement that sharpens the trend (3.0 vs 3.3 months). It is the biggest
+  step toward a *correct* difficulty model.
+- **Heteroscedasticity** is the change the timing data decisively support (+14
+  duration elpd, P(gamma>0)=1) at no cost to the headline; the **Student-t**
+  stays because it still helps once heteroscedasticity is in.
+- **Failed-run censoring** is the honest survivorship check but shifts the
+  estimand, so it stays a robustness column.
+- **Marginal horizons** for any non-50% or extrapolated quantity cost nothing
+  and remove the one genuinely misleading comparison against METR.
 
-What did **not** move under any of this: the doubling-time headline (3.3
-months) and `sigma_eps` (~2.2). The trend and the residual-difficulty scale
-are robust to every measurement-layer refinement tried here — which is itself
-the most reassuring result in the file.
+What did **not** move: the doubling-time headline is robust to every
+measurement-*layer* refinement (heteroscedasticity, Student-t, failed-run
+censoring all leave it at 3.3 months), because `eps` buffers `log_L`. It moves
+only when the *difficulty* term itself is restructured (family `eps` → 3.0),
+which is the model telling you where its trend signal actually lives. Either
+number is within the other's interval; the reassuring read is that no
+measurement or difficulty refinement pushes the doubling time outside
+~2.5–4.1 months.
 
 ## Open follow-ups
 
-- SBC at full data scale (the passes above are reduced-scale, 50 tasks / 8
-  models, per Talts et al.'s reduced protocol).
-- Structured `eps` by `task_family` / `task_source` (79 families, 3 sources)
-  to split `sigma_eps` into between- vs within-group and see how much of the
-  "8×" is un-modelled rather than irreducible (red-team #7).
+- SBC at full data scale, and on the family-`eps` variant (`gamma_sig` is
+  already wired; the family variant would need its `sigma_eps_fam/within`
+  added to the ranked list).
+- A task-family (or task-type) *covariate* on `eps`, now that ~67% of the
+  residual difficulty is shown to be between-family — it would turn that
+  structure into an interpretable predictor and shrink the "irreducible" term
+  toward its true ~1.6 log-min floor.
 - Marginal-horizon *bands* on the trend plot, not just the flattening factor.
 
 ## Reproducibility note

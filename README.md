@@ -48,6 +48,7 @@ scripts/
   marginal_horizon.py    # marginal (METR-style) vs conditional exp(theta) horizon
   measurement_value.py   # what the measurement layer buys (uncertainty vs plug-in)
   compare_measurement.py # baseline vs heteroscedastic vs failed-run censoring
+  eps_decomposition.py   # between- vs within-family split of residual difficulty
   make_measurement_figures.py  # figures for the measurement-error experiments
 outputs/                 # saved InferenceData (.nc), gitignored
 outputs/figures/         # generated plots (committed, see docs/results.md)
@@ -193,7 +194,9 @@ uv run python scripts/fit_model.py --tune 2000 --draws 2000 --chains 4 --target-
 
 # Measurement-error improvements (see docs/measurement_error_improvements.md):
 uv run python scripts/fit_model.py --tune 2000 --draws 2000 --chains 4 --target-accept 0.95 \
-    --shape kink --robust --heteroscedastic --log-likelihood   # recommended best model
+    --shape kink --robust --heteroscedastic --eps-structure family --log-likelihood  # recommended best model
+uv run python scripts/eps_decomposition.py --family outputs/fit_linear_robust_fameps.nc \
+    --flat outputs/fit_linear_robust.nc   # between/within-family residual-difficulty split
 uv run python scripts/fit_model.py --tune 2000 --draws 2000 --chains 4 --target-accept 0.95 \
     --shape linear --robust --include-human-failures --log-likelihood  # survivorship sensitivity
 uv run python scripts/marginal_horizon.py --fit outputs/fit_linear_robust.nc
