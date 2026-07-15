@@ -27,7 +27,7 @@ faithful anchor.
 Headline doubling time is **3.3 months under every measurement-*layer* variant
 tried** (heteroscedasticity, Student-t, failed-run censoring) — the trend is
 robust to how the timing *noise* is modelled. The one change that moves it is
-structuring the *difficulty* term `eps` (§6): 3.0 [2.5, 3.6] months. That is
+structuring the *difficulty* term `eps` (§5): 3.0 [2.5, 3.6] months. That is
 not a contradiction — it is the model's own logic. The IRT/trend layer is
 driven by `difficulty = log_L + eps`, and `eps` is the large, IRT-identified
 part while `log_L` is buffered behind it (red-team #2). So refinements to the
@@ -233,7 +233,13 @@ uv run python scripts/fit_model.py --shape kink --robust --heteroscedastic \
     --tune 2000 --draws 2000 --chains 4 --target-accept 0.95
 ```
 
-Heteroscedasticity passes SBC (40/40, `gamma_sig` calibrated; §6).
+Fitted end-to-end, all options compose cleanly (0 divergences, R-hat 1.01,
+ESS 5–9k) and give a **current doubling time of 2.4 [2.1, 2.7] months** — vs
+the flat-kink 2.7 [2.3, 3.1]: family-structured `eps` both shifts it faster
+*and tightens the interval*, because the sharper difficulty estimates reduce
+trend uncertainty. The component effects are unchanged from the single-option
+fits (`gamma_sig` 0.10, between-family share 0.67), i.e. they do not interact
+badly. Heteroscedasticity passes SBC (40/40, `gamma_sig` calibrated; §6).
 
 Rationale, in order of impact:
 - **Family-structured `eps`** is the most consequential change: it fits the
