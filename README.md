@@ -45,10 +45,16 @@ scripts/
   sbc.py                 # reduced-scale simulation-based calibration
   stack_shapes.py        # PSIS-LOO + Bayesian stacking across the 4 shapes
   make_figures.py        # generates outputs/figures/*.png from the fitted .nc files
+  marginal_horizon.py    # marginal (METR-style) vs conditional exp(theta) horizon
+  measurement_value.py   # what the measurement layer buys (uncertainty vs plug-in)
+  compare_measurement.py # baseline vs heteroscedastic vs failed-run censoring
+  make_measurement_figures.py  # figures for the measurement-error experiments
 outputs/                 # saved InferenceData (.nc), gitignored
 outputs/figures/         # generated plots (committed, see docs/results.md)
 docs/
   results.md             # full results: every number and plot
+  red_team_review.md     # structural critique / shortcomings
+  measurement_error_improvements.md  # experiments + recommended best model
 ```
 
 ## Data
@@ -184,6 +190,17 @@ uv run python scripts/fit_model.py --tune 2000 --draws 2000 --chains 4 --target-
 
 uv run python scripts/fit_model.py --tune 2000 --draws 2000 --chains 4 --target-accept 0.95 \
     --shape kink --robust --log-likelihood --sota-only   # METR's 14 SOTA models only
+
+# Measurement-error improvements (see docs/measurement_error_improvements.md):
+uv run python scripts/fit_model.py --tune 2000 --draws 2000 --chains 4 --target-accept 0.95 \
+    --shape kink --robust --heteroscedastic --log-likelihood   # recommended best model
+uv run python scripts/fit_model.py --tune 2000 --draws 2000 --chains 4 --target-accept 0.95 \
+    --shape linear --robust --include-human-failures --log-likelihood  # survivorship sensitivity
+uv run python scripts/marginal_horizon.py --fit outputs/fit_linear_robust.nc
+uv run python scripts/measurement_value.py --fit outputs/fit_linear_robust.nc
+uv run python scripts/compare_measurement.py --fits outputs/fit_linear_robust.nc \
+    outputs/fit_linear_robust_het.nc outputs/fit_linear_robust_hf.nc
+uv run python scripts/sbc.py --shape kink --robust --sigma-est-median 1.25 --n-reps 40  # headline-config SBC
 
 # Robustness-check scripts:
 uv run python scripts/compare_robust.py --normal outputs/fit_linear.nc --robust outputs/fit_linear_robust.nc
