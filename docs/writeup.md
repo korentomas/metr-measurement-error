@@ -19,9 +19,11 @@ doubling time **~3.3 months** on the plain linear trend, tightening to **2.4
 [2.1, 2.7]** under the fuller model; residual difficulty at fixed length of
 about **8×**, of which roughly **two-thirds is predictable task-family
 structure**, leaving a within-family residual near 5× that sits on Moss's
-~4.7×. But — and this is the part I'm least sure of — my model does *not*
-reproduce your 25–40% frontier-horizon reduction, and I don't think that's
-because either of us is obviously right.
+~4.7×. And on your 25–40% frontier-horizon reduction: my model shows only
+~10%, and I think that gap is genuinely informative rather than a
+disagreement — it's the per-task difficulty residual absorbing the length
+noise, and a falsification test (§3) says that absorption is legitimate for
+all but the very longest tasks.
 
 ---
 
@@ -74,36 +76,60 @@ reading of the horizon, so I constrain `ε` to sum to zero instead.
 The **trend layer** is Moss's, plus a per-model random effect so the
 doubling-time interval reflects model-to-model scatter; four shapes, stacked.
 
-## 3. Where I land differently from you — and why it matters
+## 3. Where I land differently from you — and, I think, why
 
-Here's the result I most want you to push on. Your SIMEX analysis finds that
-removing the measurement noise **cuts the frontier 50% horizon by 25–40%**
-(Opus 4.6, 12h → ~7h40m), driven by your point that the longest tasks are
-overestimates — extreme values in noisy data are exaggerated, so shrinking them
-pulls the top of the curve down. My joint model barely does this. The longest
-tasks shrink only ~10% (top-decile posterior means ~0.94× their raw
-annotations; the correlation between shift and length is −0.09), and the
-doubling time is essentially unmoved by anything in the measurement layer.
+Your SIMEX analysis is the result I spent the most time on, because at first my
+model flatly contradicts it. Side by side:
 
-I don't think this is a bug in either of us — I think it's a real
-identification fork, and it's `ε`. When models succeed on a task that a human
-took a long time on, there are two explanations: the task's *length* was
-overestimated (your reading — shrink `L`), or the task is genuinely long but
-*easy for its length* (a negative `ε`). Your correction only has the first
-lever, so all of that signal becomes length-shrinkage and the horizon drops.
-My model has both, and the success data mostly load it onto `ε`, so `L` stays
-near the annotation and the horizon doesn't drop. The measurement layer ends up
-buying honest *uncertainty* on the sparsely-timed tasks (a single-run task
-keeps a real ~1.8× spread a plug-in would discard) without buying your
-*downward correction*.
+| quantity | your SIMEX (on METR's model) | this model |
+|---|---|---|
+| baseliner noise σ | 0.78 (80% within 3×) | 0.79 fitted (Normal); 0.41 core + heavy tails (t) |
+| estimate noise σ | 1.05 (80% within 4×) | 1.25 prior median |
+| frontier 50% horizon, noise removed | **−25% to −40%** (Opus 4.6 12h → ~6h49m–7h38m) | **−11%** (SIMEX λ=−1 extrapolation) |
+| 80% horizon under noise-removal | **+9% to +23%** | rises (marginal curve flattens, §4) |
+| doubling time under noise | (not the focus) | flat, 3.23–3.30 mo across λ ∈ [0, 2] |
+| your stated uncertainty | "cannot rule out 0% to 60%" | — |
 
-Which of us is right is not something my fit can settle, and it's exactly the
-place a wide `σ_L` and a free `ε` could be letting my model under-shrink the
-inflated long tasks you flagged. If I had to guess, the truth is in between:
-some of those long tasks really are overestimates and my `ε` is absorbing bias
-it shouldn't. That feels like the highest-value thing to nail down, and it's
-downstream of a question neither approach answers — whether a long, human-slow,
-model-easy task is short or just easy.
+So your model's frontier horizon is strongly noise-sensitive and mine is nearly
+flat. I ran your SIMEX ladder directly on my model to be sure it's a real
+difference and not a definitional one (`scripts/simex.py`: add √λ·σ noise to the
+timing, refit, extrapolate to λ=−1), and it is real — the slope is essentially
+zero, giving that −11%.
+
+I think the gap is `ε`, and I think it's resolvable rather than a standoff.
+Here's the argument. The frontier horizon `exp(θ_m)` lives on the **difficulty**
+scale, `log L + ε`, and that sum is what the cross-model success data pins — not
+`log L` on its own. In METR's model there is no per-task `ε`, so difficulty *is*
+length, and shrinking a noisy over-long task drops its difficulty and pulls the
+horizon down: your 25–40% is exactly right *for that model*. Add a per-task
+difficulty residual — Moss's `ε`, which the data very much want (`σ_ε ≈ 2.2`) —
+and length noise moves the split between `log L` and `ε` while leaving their sum,
+and so the horizon, almost untouched. The −11% that remains is just the modest
+hierarchical shrinkage of `log L` toward the population mean; the other ~25
+points of your effect are absorbed by `ε`.
+
+The obvious worry is that this is too convenient: maybe `ε` is a sponge soaking
+up length bias it shouldn't, and my flat horizon is wrong. So I tried to falsify
+it (`scripts/fork_discriminator.py`). The test: on well-timed tasks, where the
+length is pinned by data, is `ε` doing something *sensible* with length, or just
+absorbing whatever the success data throw at it? If a long-human, model-easy
+task is really a mis-timed short task, `ε` should be running systematically
+*negative* on the long, poorly-timed tasks — the tell of absorbed
+over-estimation. It runs the other way. On well-timed tasks longer tasks are
+mildly *harder* for their length (`ε`–length slope +0.09), and the poorly-timed
+long tasks sit *above* that trend (`ε` ≈ +1.5, excess +1.9, t ≈ 6.9), i.e. the
+model reads them as genuinely hard, which they are — they're the 8h RE-Bench-
+style tasks. `ε` is not a length-bias sponge; it's tracking real difficulty.
+
+So my read, hedged appropriately: your 25–40% is the correct answer to "what
+does measurement noise do to a difficulty-equals-length horizon," and the honest
+answer once difficulty is separately identified is much smaller, ~10%, because
+the horizon was never really riding on the length of the longest tasks — it was
+riding on their difficulty, which the success data fix directly. The one place I
+can't fully back myself is the very longest estimate-only tasks (the 30h ones),
+where the IRT signal is thin — few models, few attempts — so `ε` there is the
+least trustworthy, and that's the residue where your simpler length-shrinkage
+might still be the safer bet. But it's a residue, not the whole 25–40%.
 
 ## 4. The additions, and how they connect back to your findings
 
@@ -145,12 +171,21 @@ refinement that moves the headline, tightening the doubling time to 2.4.
 ## 5. Where it lands
 
 The doubling time holds a ~2.4–3.3 month band through every change, so the
-*trend* is robust to how the timing is modelled. But your note is mostly about
-the horizon *level* at the frontier, and there my model and your SIMEX
-disagree — not by a little, and for a reason (`ε` vs length-shrinkage) that I
-can't resolve from inside my own fit. Given how hedged you were about the noise
-impact — you couldn't rule out anywhere from 0% to 60% — I don't want to claim
-the Bayesian version settles it. If anything it reframes the uncertainty as a
-concrete identification question: is a human-slow, model-easy task short, or
-just easy? That's the number I'd most like to pin down next, and the place your
-SIMEX and this model are the two ends of the same rope.
+*trend* is robust to how the timing is modelled. On the horizon *level* — the
+thing your note is really about — I think the picture is now less of a standoff
+than it looked. Your 25–40% is the right answer for a difficulty-equals-length
+model; put a data-supported per-task difficulty residual in, and the honest
+figure is closer to ~10%, because the horizon rides on difficulty (which the
+success data fix) rather than on the length of the longest tasks (which the
+noise corrupts). The discriminator says the `ε` doing that absorbing is real
+and not a length-bias sponge, so I'd now put more weight on the small number
+than the large one — with the explicit exception of the 30h estimate-only
+tasks, where the IRT signal is too thin for me to trust `ε` over your simpler
+shrinkage.
+
+If I had to name the single crux left, it's not "is the noise 0% or 60%" any
+more — it's whether the cross-model success pattern on the sparsest, longest
+tasks is trustworthy enough to identify their difficulty. That's a narrower and
+more answerable question than where we started, and it's probably where a
+next pass (more baseliner runs on the long tasks, or a stronger prior tying
+their `ε` to family structure) would actually move the number.
