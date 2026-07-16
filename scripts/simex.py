@@ -53,6 +53,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--lambdas", nargs="+", type=float, default=[0.0, 0.5, 1.0, 2.0])
     ap.add_argument("--shape", default="linear")
+    ap.add_argument("--eps-structure", choices=["flat", "family"], default="flat",
+                    help="Structure the difficulty residual; 'family' pins difficulty "
+                    "better and re-tests the noise-correction under the better model.")
     ap.add_argument("--tune", type=int, default=1000)
     ap.add_argument("--draws", type=int, default=1000)
     ap.add_argument("--chains", type=int, default=2)
@@ -71,7 +74,8 @@ def main() -> None:
         if lam > 0:
             noise = rng.normal(0.0, np.sqrt(lam) * sigma_obs)
             data.log_dur = data.log_dur + noise
-        model = build_model(data, shape=args.shape, duration_dist="studentt")
+        model = build_model(data, shape=args.shape, duration_dist="studentt",
+                            eps_structure=args.eps_structure)
         with model:
             idata = pm.sample(tune=args.tune, draws=args.draws, chains=args.chains,
                               random_seed=args.seed, nuts_sampler="nutpie",

@@ -21,9 +21,9 @@ about **8×**, of which roughly **two-thirds is predictable task-family
 structure**, leaving a within-family residual near 5× that sits on Moss's
 ~4.7×. And on your 25–40% frontier-horizon reduction: my model shows only
 ~10%, and I think that gap is genuinely informative rather than a
-disagreement — it's the per-task difficulty residual absorbing the length
-noise, and a falsification test (§3) says that absorption is legitimate for
-all but the very longest tasks.
+disagreement — it's the per-task difficulty residual absorbing most (not all)
+of the length noise, a falsification test (§3) says that absorption is
+legitimate, and the ~10% that leaks through is a real residual, not zero.
 
 ---
 
@@ -124,12 +124,26 @@ style tasks. `ε` is not a length-bias sponge; it's tracking real difficulty.
 So my read, hedged appropriately: your 25–40% is the correct answer to "what
 does measurement noise do to a difficulty-equals-length horizon," and the honest
 answer once difficulty is separately identified is much smaller, ~10%, because
-the horizon was never really riding on the length of the longest tasks — it was
-riding on their difficulty, which the success data fix directly. The one place I
-can't fully back myself is the very longest estimate-only tasks (the 30h ones),
-where the IRT signal is thin — few models, few attempts — so `ε` there is the
-least trustworthy, and that's the residue where your simpler length-shrinkage
-might still be the safer bet. But it's a residue, not the whole 25–40%.
+the horizon rides on difficulty, which the success data fix, more than on the
+length of the longest tasks, which the noise corrupts.
+
+I want to be careful about *why* that ~10% isn't zero, because when I first
+wrote this up I got the reason wrong. My first guess was that the long
+estimate-only tasks (your 30h ones) have thin success data, so their difficulty
+is barely pinned and `ε` is untrustworthy there. That's just false: those tasks
+are the RE-Bench / AI-R&D ones that *every* model attempted — ~20 models, ~90
+attempts each. The success signal on them is strong. What's actually going on is
+subtler and less flattering to a clean story. For those tasks `log L` and `ε`
+trade off in the posterior with correlation about −0.66 — strong, but *not* −1.
+So a perturbation to the annotation is *mostly* absorbed by `ε`, leaving the
+difficulty and the horizon nearly fixed, but about a third of it leaks through.
+That partial, not total, absorption is the ~10%. And the difficulty of those
+tasks is itself only moderately pinned (posterior sd ≈ 0.85 log-min, ~2.3×) —
+not because the attempts are few, but because identifying one task's difficulty
+against uncertain abilities and discriminations has its own floor. So I'm not
+claiming the horizon is *immune* to the length noise, only that it's
+*attenuated* — from your ~30% to about a third of that — and the residue is real
+rather than an artifact I can wave away.
 
 ## 4. The additions, and how they connect back to your findings
 
@@ -173,19 +187,33 @@ refinement that moves the headline, tightening the doubling time to 2.4.
 The doubling time holds a ~2.4–3.3 month band through every change, so the
 *trend* is robust to how the timing is modelled. On the horizon *level* — the
 thing your note is really about — I think the picture is now less of a standoff
-than it looked. Your 25–40% is the right answer for a difficulty-equals-length
-model; put a data-supported per-task difficulty residual in, and the honest
-figure is closer to ~10%, because the horizon rides on difficulty (which the
-success data fix) rather than on the length of the longest tasks (which the
-noise corrupts). The discriminator says the `ε` doing that absorbing is real
-and not a length-bias sponge, so I'd now put more weight on the small number
-than the large one — with the explicit exception of the 30h estimate-only
-tasks, where the IRT signal is too thin for me to trust `ε` over your simpler
-shrinkage.
+than it looked, though I've had to walk back the neatest version of it. Your
+25–40% is the right answer for a difficulty-equals-length model; put a
+data-supported per-task difficulty residual in, and the honest figure is closer
+to ~10%, because the horizon rides more on difficulty (which the success data
+fix) than on the length of the longest tasks (which the noise corrupts). The
+discriminator says the `ε` doing that absorbing is real and not a length-bias
+sponge. But the absorption is partial (that log_L–ε correlation is −0.66, not
+−1), so ~10% genuinely leaks through, and I don't want to round it to zero.
 
-If I had to name the single crux left, it's not "is the noise 0% or 60%" any
-more — it's whether the cross-model success pattern on the sparsest, longest
-tasks is trustworthy enough to identify their difficulty. That's a narrower and
-more answerable question than where we started, and it's probably where a
-next pass (more baseliner runs on the long tasks, or a stronger prior tying
-their `ε` to family structure) would actually move the number.
+If I had to name the crux left, it's narrower than where we started but it did
+move on me. It is *not* "are the long tasks under-attempted" — they aren't. It's
+that identifying a single task's difficulty from the success pattern has a floor
+(≈2.3× here) even with 90 attempts, so some of your length-noise effect survives
+as that residual ~10%. Where a next pass would actually move the number is
+better difficulty identification on those tasks — which is one more reason I lean
+on the family structure, since pooling difficulty within a family is exactly the
+lever that tightens it.
+
+I did run your SIMEX ladder on the family-structured model to check that, and it
+holds: the implied noise-correction comes out −8.7%, a touch tighter than the
+−10.9% under the flat model, with the doubling time flat at 2.9–3.0 across the
+ladder. So better difficulty identification does nudge the residual down, in the
+direction the mechanism predicts, but only a little — family pooling can only
+help the fraction of long tasks that have well-estimated family-mates (here
+about a quarter of them), so it's a nudge, not a resolution. The honest summary
+is that the number lives in a ~9–11% band, robust across two model
+specifications, an order of magnitude short of the difficulty-equals-length
+figure but stubbornly not zero. That last stubbornness is, I think, the real
+finding — and the place I'd want you to tell me whether the floor I'm hitting is
+the model's or the data's.
