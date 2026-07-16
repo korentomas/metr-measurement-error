@@ -1,253 +1,187 @@
 # A measurement-error model for METR's time horizon
 
-*What I took from Jonas Moss and Alexander Barry, how I turned it into a
-Bayesian measurement-error model, what that model said, and the additions I
-tried once it was running.*
+*Building on Jonas Moss's IRT reanalysis and Alexander Barry's measurement-error
+model: what I reused, what I did differently, and what the additions found.*
 
-This is written to build the idea up in the order it actually came together,
-so that anyone who has read Moss's reanalysis and Barry's comments can see
-exactly which pieces are theirs, which are mine, and why each addition exists.
-Nothing here is a criticism of the earlier work — it's the opposite. The whole
-model is a chain of "yes, and": every layer I added is answering a question
-that Moss's model or Barry's comments raised but left open.
+Most of this will be familiar to the two of you, because most of it is yours.
+Moss supplied the IRT-on-human-time skeleton and the trend; Barry, independently,
+had already built a measurement-error model of the baseliner times that is close
+to the one I use. What I did was join those two threads into a single joint
+model, pick a different identification fix, and then chase a handful of questions
+the running model raised about itself. The point of writing it up in order is so
+you can see exactly which piece answers which question, and tell me where I've
+talked myself into something.
+
+Where it lands, up front: current doubling time **~3.3 months** under the plain
+linear trend, tightening to **2.4 [2.1, 2.7]** under the recommended
+configuration; residual task-difficulty spread of about **8×** at fixed length,
+of which — this is the part I'd most like your read on — roughly **two-thirds is
+predictable task-family structure** rather than irreducible noise, leaving a
+within-family residual of about 5× that sits right on Moss's ~4.7×.
 
 ---
 
-## 1. Where this starts: Moss's IRT reanalysis
+## 1. The two starting points
 
-The starting point is Jonas Moss's item-response reanalysis of METR's
-time-horizon data. The move I found most useful there is the reframing: METR
-asks "at what task length does a model succeed 50% of the time?", and Moss
-recasts the whole thing as a **2-parameter logistic IRT model**. Each task is
-an *item* with a difficulty and a discrimination; each model is a *respondent*
-with an ability; a model's probability of solving a task is a logistic function
-of (ability − difficulty), scaled by the task's discrimination. The 50% time
-horizon then falls out of the fitted abilities instead of being read off a
-per-model curve fit.
+From Moss I took the reframing of METR's 50%-horizon question as a 2PL IRT
+model, with difficulty anchored on the log human-minutes scale so that ability
+`θ_m` reads directly as a log-horizon, and a trend on ability across release
+dates. I also took, though I'll come back to it, his **unexplained-difficulty**
+term — the ~4.7×-per-SD spread of difficulty that log-length doesn't account
+for. That term matters more than it first looks.
 
-Two things about Moss's setup carry straight into what I built:
+The one modelling choice I didn't keep is the one Barry had already flagged and
+fixed in his own way: Moss treats each task's `human_minutes` as a fixed,
+exactly-known scalar. It isn't. For most tasks it's a geometric mean of one or
+two baseline runs, within-task wall-times routinely differ 1.5–2×, and a chunk
+of tasks have no timed run at all — only an expert estimate. So `human_minutes`
+is a noisy, sparsely-observed measurement of a latent length, and because
+difficulty is built on it, that noise is being pushed straight into difficulty
+and the trend while being hidden from the posterior.
 
-- **Difficulty lives on the human-time scale.** A task's difficulty is
-  anchored to `human_minutes` — the human baseline time — so a model's ability
-  `θ_m` is interpretable in log-minutes and `exp(θ_m)` is its 50% horizon.
-- **Ability moves over time.** He puts a log-linear trend on ability across
-  release dates, which is what turns the cross-section into a doubling-time
-  estimate.
+Barry's model already treats it correctly: baseliner times as the true task
+length times lognormally-distributed noise, with the noise level estimated from
+the tasks that have several attempts. That's essentially the measurement layer
+below. Where we diverged, as I understand your comments, is that you handled
+baselined and estimate-only tasks separately and defined the p-horizon over
+baselined tasks only, whereas I keep them in one model with a wider noise prior
+on the estimates — which is where your second contribution comes in.
 
-I kept both. What I did *not* keep is one modelling assumption underneath them,
-and that assumption is the reason this project exists.
+## 2. The two things I took from Barry directly
 
-## 2. The itch: human time is a measurement, not a constant
+The **60%-within-3× number.** Your finding that only ~60% of the estimate-only
+annotations land within a factor of three of the real baseline time is the only
+thing pinning how much the model should distrust an estimate — under a log-scale
+error it implies a noise SD around 1.3 log-minutes, and since no task in my set
+carries both an annotation and a timed run, I can't recover it internally. It
+goes in as a prior. Without it the estimate-only tasks (which skew long, up to
+30h) are free to wander.
 
-In Moss's model each task's `human_minutes` is a **fixed, exactly-known
-scalar**. But look at where that number comes from: for most tasks it's the
-geometric mean of one or two human baseline runs, and for a chunk of tasks
-there is no timed run at all — just an expert's estimate. Within a task, human
-wall-times routinely differ by 1.5–2× (people take breaks, get stuck, vary),
-and the estimate-only tasks could be off by much more.
+The **circularity warning.** Your sharper point — that once length and
+difficulty are both latent and both fed by the success data, the outcomes can
+push a task's inferred *length* around, so the trend ends up partly fit to
+lengths the outcomes themselves chose — is the kind of thing that stays
+invisible until named. It turned into an explicit diagnostic and a cut-model
+check later, and you were right that it's real; the question was only whether it
+was large.
 
-So `human_minutes` is not a constant; it's a **noisy, sparsely-observed
-measurement** of a latent "true" task length. And because difficulty is built
-directly on it, that measurement error is being silently injected into every
-task's difficulty — and then, through the difficulty-vs-ability comparison,
-into the horizon and the trend. Treating the noisy thing as known truth doesn't
-make the noise go away; it just hides it and makes the posterior look more
-certain than it should.
+## 3. The model
 
-That's the itch. The natural fix is Bayesian: promote `human_minutes` from a
-constant to a **latent variable** with its own measurement model, and let the
-data — both the timing observations and the success/failure pattern — inform
-it jointly. That's the core of this whole model.
+Three layers over a shared set of per-task latents.
 
-## 3. Two things Barry pointed out
+The **measurement layer** is Barry's: each task gets a latent `log(L_i)`, timed
+runs are `log(dur) ~ Normal(log L_i, σ_base)`, estimate annotations are
+`Normal(log L_i, σ_est)` with `σ_est` set by the 60%-within-3× prior.
 
-Before the model, the two things from Alexander Barry's comments that shaped it:
-
-- **Estimates are worse than I'd have guessed, and by a measurable amount.**
-  Barry noted that only ~60% of the estimate-only human-time annotations land
-  within a factor of 3 of the real baseline time where both exist. That's a
-  concrete, usable number: under a log-scale error it pins the noise on an
-  estimate annotation to about `ln(3)/Φ⁻¹(0.8) ≈ 1.3` log-minutes. My own data
-  can't check this (no task carries both an annotation *and* a timed run), so
-  Barry's figure enters the model as an external prior on the estimate-noise
-  scale. Without it, the model has no idea how much to distrust an estimate.
-
-- **The circularity warning.** Barry's sharper point: once you jointly model
-  task difficulty *and* task length and let both be informed by the
-  success/failure data, you open a feedback loop. The success outcomes can push
-  a task's *inferred length* around — a task models keep solving gets re-dated
-  shorter, one they keep failing gets re-dated longer — and then the trend is
-  partly fit to lengths the outcomes themselves chose. A Bayesian model built
-  carelessly here can end up *more* misleading than the frequentist original.
-  This is exactly the kind of thing that's invisible until someone names it,
-  and it turned into a diagnostic and a cut-model check later on.
-
-So: from Moss, the IRT skeleton and the human-time difficulty scale; from
-Barry, the calibration for estimate noise and a standing warning about
-feedback. Now the model.
-
-## 4. The model I built
-
-The model has three layers stacked on a shared set of per-task latents. The
-one-line version: **each task has a true log-length I don't observe directly; I
-learn it from the noisy timing data and the success pattern at once, and I keep
-an explicit "residual difficulty" term so that length doesn't have to explain
-everything.**
-
-**Measurement layer.** Every task `i` gets a latent log-length `log(L_i)`. The
-timed human runs are noisy observations of it, `log(dur) ~ Normal(log(L_i),
-σ_base)`; the estimate-only annotations are noisier observations of the same
-thing, `log(rep) ~ Normal(log(L_i), σ_est)`, with `σ_est`'s prior set by
-Barry's 60%-within-3× number. This is the layer that promotes `human_minutes`
-from constant to latent.
-
-**IRT layer — and the one genuinely new term.** Keeping Moss's 2PL, the
-probability model `m` solves task `i` is `logit⁻¹(a_i · (θ_m − difficulty_i))`.
-The difficulty is where I depart from Moss:
+The **IRT layer** is Moss's 2PL, `logit⁻¹(a_i·(θ_m − difficulty_i))`, with
 
 > `difficulty_i = log(L_i) + ε_i`
 
-`ε_i` is a **residual difficulty** term — how much harder or easier a task is
-for models than its human length alone predicts. It has to be there: task
-length is only a rough proxy for what makes something hard for a model (how
-much context it must hold, how many tool calls it has to chain correctly,
-whether it's the kind of reasoning these models are good at). Without `ε`, all
-of that mismatch would be forced back onto `log(L)` and would corrupt the
-timing estimate.
+and `ε_i` the unexplained-difficulty term. I want to be careful here: `ε` is not
+my invention — it's Moss's ~4.7× spread, just written as an explicit per-task
+effect rather than a regression residual. What *is* a real change is how I
+identify it. A free `ε` added to a latent `log L` creates a shift
+non-identifiability — only `θ_m − (log L_i + ε_i)` enters the likelihood, so a
+constant added to every `ε` and subtracted from every `θ` is invisible, and the
+sampler drifts along that ridge. Moss breaks it by anchoring two ability values;
+I couldn't, because anchoring `θ` would break the log-minute reading of the
+horizon that the timing data works to establish. So I constrain the `ε` to sum
+to zero instead. Same problem, a fix chosen to protect the property I care
+about.
 
-**The identification problem `ε` creates, and the fix.** The moment you add a
-free per-task `ε` to the difficulty, you get a non-identifiability: only
-`θ_m − (log L_i + ε_i)` enters the likelihood, so adding a constant to every
-`ε` and subtracting it from every `θ` leaves everything unchanged. There's a
-flat ridge in the posterior and the sampler wanders along it. Moss avoids the
-analogous problem by **hard-anchoring two ability values** (`θ_low = −1`,
-`θ_high = +1`). I couldn't do that, because anchoring `θ` would destroy the
-log-minute meaning of the horizon that the timing data works so hard to pin
-down. Instead I constrain the residuals to **sum to zero** across tasks (a
-`ZeroSumNormal`). That removes the ridge directly — the shift degree of freedom
-is gone — while keeping `θ_m` interpretable as a log-minute horizon. Same
-disease Moss treats, a different medicine chosen to protect the property I
-care about.
+The **trend layer** is `θ_m = f(t_m) + u_m`: Moss's trend plus a per-model
+random effect `u_m`, so the doubling-time interval reflects model-to-model
+scatter and not just within-model noise. `f` is one of four shapes combined by
+stacking rather than chosen. (And the usual non-centered parameterization
+throughout, without which the 1–2-observation-per-task geometry funnels and the
+sampler stalls.)
 
-**Trend layer.** Ability is `θ_m = f(t_m) + u_m`: a trend `f` in release date
-plus a **per-model random effect** `u_m` so the doubling-time interval reflects
-real model-to-model scatter, not just within-model noise. `f` is one of four
-shapes (linear, a kink, super-exponential, logistic), combined by Bayesian
-stacking rather than picking one.
+So: Barry's measurement layer + Moss's IRT-and-trend, unified across baselined
+and estimate tasks, with a sum-to-zero identification and per-model random
+effects as the structural differences.
 
-**Geometry.** With only 1–2 timing observations per task, the naive
-parameterization funnels badly, so `log L`, `ε`, and `u` are all non-centered.
-This is plumbing, but it's the difference between the sampler working and not.
+## 4. What it said, and where it agreed with you both
 
-That's the model: Moss's IRT trend, wrapped in a measurement layer that treats
-human time as latent, with a sum-to-zero residual-difficulty term as the new
-structural piece.
+The doubling time comes out around 3.3 months on the plain linear trend, in the
+same neighbourhood as Moss's 4.3 and METR's numbers once the trend shapes and
+time windows are lined up; my linear-vs-Moss gap is the measurement layer and
+the random effects, not the data. Barry's ~2× -over-METR at 80% and the whole
+"80% horizons are an order of magnitude off" point both live in the same place
+mine does — the difficulty spread — which is the next section.
 
-## 5. What it said
+The circularity you warned about is present and in the predicted direction
+(tasks models solve pulled shorter, ones they fail pulled longer), but a
+cut-model refit that severs the loop moves the headline by about a day. Real,
+measured, small.
 
-The first-order results:
+Two stress tests worth reporting. Moss's suggestion to try a Weibull duration
+likelihood: I did, and it fits worse — the within-task residuals are
+right-skewed with heavy tails and a Weibull's log is fixed left-skewed, so it's
+the wrong shape however you set it. A Student-t, by contrast, earns its place;
+the fitted dof lands near 2.4, so the wall-clock tails are real and heavy.
 
-- **The residual difficulty is large.** `σ_ε ≈ 2.2` log-minutes — about an
-  **8× spread** in difficulty at fixed task length. That's the empirical case
-  for having the layer at all: length really is a noisy proxy. A task that
-  reads as ten minutes of human work can be as hard for a model as an
-  hour-and-twenty, or vice versa.
-- **The doubling time is ~3.3 months** (linear), landing in the same
-  neighbourhood as Moss's and METR's numbers once you line the trend shapes and
-  time windows up; the differences between the three trace to trend shape and
-  the added measurement/random-effect structure, not to the data going in.
-- The estimate-noise and circularity concerns from Barry both showed up exactly
-  where predicted: the feedback is real and detectable (easy-for-models tasks
-  pulled shorter, hard ones longer), but a cut-model refit that severs the loop
-  moves the headline by about a day. Named, measured, contained.
+## 5. The additions, and the one number I'd flag
 
-Then the stress tests. Moss suggested trying a **Weibull** duration likelihood
-instead of log-normal; I did, and it fits *worse* — our within-task residuals
-are right-skewed with heavy tails, and a Weibull's log is fixed left-skewed, so
-it's structurally the wrong shape. A clean negative result, but a real one. A
-**Student-t** duration likelihood, by contrast, earns its place: the wall-clock
-data has genuine heavy tails (a few runs 3–4 log-units off their task median),
-and the fitted degrees of freedom come out around 2.4 — the data decisively
-want heavy tails. And reduced-scale **simulation-based calibration** passes, so
-the machinery recovers what it puts in.
+Once it ran, each thing I looked at hard pointed to the next.
 
-## 6. The additions I tried
+**Which horizon is it, marginally or conditionally?** This is your and Moss's
+"marginal vs typical 80%" point, and I wanted to know how much it bit for mine.
+`exp(θ_m)` is a horizon conditional on a median-difficulty task (`ε = 0`);
+METR's is marginal over the task population. The reassuring part: the 50% level
+and the doubling-time slope are safe — by symmetry the marginal success curve
+still crosses 0.5 at `θ_m`, and a stationary `ε` cancels from the slope. The
+unreassuring part, and the reason your 80% number moves so much: the marginal
+curve is about 1.9× flatter, so every non-50% horizon and every threshold
+extrapolation diverges. So the 50% horizon and doubling time transfer directly;
+anything at 80% has to be computed marginally, exactly as you both argued.
 
-Everything above is the model as first built. Once it was running, each thing I
-looked at hard suggested a next thing to add. This is the part I most want
-feedback on.
-
-**Is the reported horizon even the same object as METR's?** `exp(θ_m)` is a
-horizon *conditional* on a task of median residual difficulty (`ε = 0`); METR's
-is *marginal*, averaged over the task population. With `σ_ε` this large, I
-worried these differed a lot. Working it through: the 50% level and the
-doubling-time slope are actually **safe** — by symmetry the marginal success
-curve still crosses 0.5 at `θ_m`, and a stationary `ε` distribution cancels out
-of the slope. But everything else isn't: the population curve is ~1.9× flatter,
-so any non-50% reliability horizon or any extrapolation to a fixed threshold
-diverges from METR's. So the rule became: quote the 50% horizon and doubling
-time as-is, but compute anything else marginally.
-
-**What does the measurement layer actually buy?** Uncomfortable observation:
-because the IRT layer only sees `log L + ε` and `ε` is free and large, any
-error in `log L` gets absorbed by `ε` as far as the trend is concerned — so the
-measurement layer barely moves the *point* estimate. What it buys is
-**honesty about uncertainty**: a task timed by a single human run has a real
-posterior spread in its length (~1.8×) that a plug-in model treating
-`human_minutes` as exact throws away. The layer widens the intervals for
-exactly the sparsely-timed tasks that deserve it.
+**Is the measurement layer even doing work?** Honestly, not much to the point
+estimate — because the IRT layer only sees `log L + ε` and `ε` is free, error in
+`log L` is absorbed by `ε` as far as the trend cares. What it buys is honest
+uncertainty: a task timed by a single human run has a real ~1.8× posterior
+spread in its length that a plug-in treatment throws away. The layer widens the
+intervals for the sparsely-timed tasks that deserve it, and leaves the trend
+alone.
 
 **The measurement noise isn't constant.** The within-task spread of log
-wall-time grows with task length in the data (short tasks ~0.28, long ~0.57).
-So I let the noise scale with length, `σ_base,i = σ_base · exp(γ · (log L_i −
-μ))`. The data are decisive: `γ = +0.10`, essentially zero probability of being
-negative, and it improves the duration fit by a solid margin. It doesn't touch
-the headline, but it's a strictly better-specified measurement layer.
+wall-time grows with length (short ~0.28, long ~0.57), so I let `σ_base` scale
+with length. The data are decisive — the coefficient is positive with
+essentially no mass below zero — and it improves the duration fit cleanly
+without touching the headline.
 
-**Survivorship.** METR (and so the model) uses only *successful* human runs as
-timing anchors. But there are 129 *failed* timed human runs on the snapshot,
-sitting on hard tasks, with median wall-times of a couple of hours versus a few
-minutes for successes. Dropping them truncates the length distribution to
-"fast enough to succeed." I added them back as **right-censored** observations
-(a failure that ran `w` minutes says the completion time exceeds `w`), through
-the censoring path the model already had. It's self-weighting — a quick give-up
-says almost nothing, a genuine hard-task failure pulls hard — and it lifts the
-hard tasks' lengths where it should. I keep it as a sensitivity rather than the
-default, because it does subtly shift the estimand away from METR's
-"successful-completion" definition of human time.
+**Survivorship.** Only successful human runs anchor length, but there are 129
+failed timed runs on hard tasks with median wall-times of a couple of hours
+against a few minutes for successes. Adding them back as right-censored
+observations lifts the hard tasks' lengths where it should; I keep it as a
+sensitivity because it does shift the estimand off METR's successful-completion
+definition.
 
-**The addition I care about most: structuring the residual difficulty.** `σ_ε`
-being ~8× is the headline uncertainty, and I'd been reporting all of it as
-irreducible. But is it? I split `ε` into a **task-family** effect plus a
-within-family residual. The answer: **about two-thirds of the residual-
-difficulty variance is between-family** — i.e. predictable structure, not
-noise. And the family effects are exactly what you'd expect on inspection:
-pattern-continuation and cryptanalysis families are ~100× *harder* than their
-human length implies, while arithmetic, file-selection and alert-triage are
-~100× *easier*. The success data clearly prefer this structured version. This
-matters two ways: it says the genuinely irreducible per-task difficulty is
-smaller (~5×, not 8×), and — because `ε` is the part of difficulty the trend is
-actually read against — it's the **one refinement that moves the headline**,
-tightening the current doubling time to about 2.4 [2.1, 2.7] months.
+**The one I'd flag.** `ε` at ~8× (σ ≈ 2.2) is bigger than Moss's ~4.7×, and I
+wanted to know why, so I split `ε` into a task-family effect and a within-family
+residual. About **two-thirds of the difficulty variance is between-family** —
+predictable structure, not noise — and the family effects are exactly what you'd
+guess: pattern-continuation and cryptanalysis families run ~100× harder than
+their length implies, arithmetic and file-selection ~100× easier. The success
+data clearly prefer the structured version. Two things follow. First, the
+genuinely irreducible within-family residual is about **5× (σ ≈ 1.6)** — which
+lands right on Moss's ~4.7×, so I think the gap between our difficulty numbers
+was mostly that his residual pools structure mine was leaving loose. Second,
+because `ε` is the part of difficulty the trend actually reads against,
+structuring it is the *one* refinement that moves the headline — the current
+doubling time tightens to 2.4 [2.1, 2.7] months.
 
-That last point is the through-line of the whole exercise. Refinements to the
-*length* channel wash out, because `ε` buffers them; the refinement to the
-*difficulty* channel is what sharpens the trend. The model is telling you where
-its signal actually lives — and it lives in `ε`, the term that wasn't in the
-original at all.
+That's the through-line. Refinements to the *length* channel wash out, because
+`ε` buffers them; the refinement to the *difficulty* channel is what moves the
+trend. Which is really the model saying its signal lives in the term all three
+of us have some version of — Moss's unexplained difficulty, and here its
+family structure.
 
-## 7. Where it lands
+## 6. Where it lands
 
-Stepping back, the lineage is: Moss's IRT-on-human-time gives the skeleton and
-the horizon scale; the measurement-error layer answers "but human time is
-noisy"; the residual-difficulty term answers "but length isn't difficulty," and
-forces the sum-to-zero identification; Barry's two points calibrate the
-estimate noise and flag the feedback; and the later additions answer the
-questions the running model raised about itself — which horizon it's reporting,
-what the measurement layer is really for, whether the noise is constant, whether
-survivorship bites, and how much of the residual difficulty is real structure.
-
-The reassuring summary is that the doubling time stays in a ~2.4–3.3 month band
-through every one of these changes. The interesting summary is *why* it moves
-when it moves: not when I refine the timing, but when I refine what "difficulty"
-means. That's the part I'd most like Barry's and Moss's read on.
+The doubling time stays in a ~2.4–3.3 month band through every change, so the
+trend itself is robust to how I model the timing. The interesting part is *when*
+it moves: not when I refine the human-time measurement, but when I refine what
+"difficulty" means — and when I do, my headline difficulty number reconciles
+with Moss's. If there's an error in the chain I'd bet it's in the family
+decomposition or the marginal-horizon symmetry argument, and those are the two
+places I'd most value a second pair of eyes.
