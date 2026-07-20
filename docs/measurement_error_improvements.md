@@ -222,10 +222,10 @@ coverage is near nominal. The parameters that drive the headline (`delta`,
 `t_k`) and the robust layer (`nu`) are well calibrated. The headline
 configuration is now SBC-backed, not only the simplified stand-in.
 
-The **recommended** configuration (kink + Student-t + **heteroscedastic**)
-also passes, 40 of 40, with the new `gamma_sig` well calibrated (mean rank
-0.513, KS p 0.94, cov50 0.53, cov90 0.90). Thus, the adoption of
-heteroscedasticity does not break calibration:
+The recommended *measurement layer* (kink + Student-t + **heteroscedastic**,
+without the family `eps`) also passes, 40 of 40, with the new `gamma_sig`
+well calibrated (mean rank 0.513, KS p 0.94, cov50 0.53, cov90 0.90). Thus,
+the adoption of heteroscedasticity does not break calibration:
 
 ```
 === SBC (kink + robust + heteroscedastic): 40/40 reps fit ===

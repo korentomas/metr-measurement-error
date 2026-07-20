@@ -4,9 +4,9 @@ This document is a structural critique of `models/time_horizon_model.py` and
 the pipeline around it (`data/`, `models/data_prep.py`, `scripts/`). The
 model is well built, and it is unusually honest about its own limits. The
 README's "Open work" list and `docs/results.md` already flag several of the
-points below. This document collects all of the points in one place, adds
-the points that are *not* flagged, and ranks them by how much they threaten
-the headline. Two small analytic probes back the structural claims. (The
+points below. This document collects all of the points in one place. It adds
+the points that are *not* flagged, and it ranks them by threat to the
+headline. Two small analytic probes back the structural claims. (The
 probe script was a scratch file and is not in the repository. Probe 1 is a
 numeric integration of the logistic curve against the `eps` distribution at
 the stated parameter values. Probe 2 is the `sigma_base/sqrt(k)` pinning
@@ -112,7 +112,7 @@ horizon estimate." But the IRT layer only ever sees
 IRT/horizon inference, `eps_i` simply reabsorbs any error or uncertainty in
 `log_L_i`. Probe 2: with `log_L` pinned by even a single timed run,
 **96.6%** of any shift in the identified difficulty sum lands on `eps`, not
-on `log_L` (98.3% at k = 2, and 98.9% at k = 3).
+on `log_L`. (The share is 98.3% at k = 2, and 98.9% at k = 3.)
 
 Consequences:
 
@@ -157,8 +157,8 @@ is read against. At the time of this review, no document mentioned it as a
 limitation.
 
 **Fix:** quantify how often humans failed per task. If the count is
-non-trivial, model the human attempt as its own (censored or lapse) process,
-or at least report the direction and the rough size of the survivorship
+non-trivial, model the human attempt as its own (censored or lapse) process.
+Or at least report the direction and the rough size of the survivorship
 bias.
 
 **Status:** answered in
@@ -212,28 +212,30 @@ artifact, not a literal in code.
 ### 6. SBC validates a different model than the one in the headline
 
 The headline uses the **Student-t** layer, **stacked** over four shapes, at
-full scale (228 tasks, 20 models), with `sigma_est` median **1.25**. The SBC
-in `scripts/sbc.py` and `docs/results.md` uses the **Normal** layer, the
-**linear** shape only, reduced scale (50 tasks, 8 models), `sigma_est`
-median **0.8**, and 50 replications. Thus, the calibration evidence does not
-touch:
+full scale (228 tasks, 20 models), with `sigma_est` median **1.25**. At the
+time of this review, the SBC in `scripts/sbc.py` and `docs/results.md` used
+the **Normal** layer, the **linear** shape only, reduced scale (50 tasks, 8
+models), `sigma_est` median **0.8**, and 50 replications. Thus, the
+calibration evidence at that time did not touch:
 
 - the Student-t `nu` parameter and the heavy-tail geometry in actual use
+  (rank-checked after this review — refer to the status line below)
 - the kink, superexp, and logistic shapes (the kink drives the headline) —
-  their extra parameters (`delta`, `t_k`, `beta2`, `h`, `t0`, `s`) are never
-  rank-checked, and the logistic is *known* to be poorly identified
-  (`docs/results.md`: the ceiling parameter is pinned at its prior edge)
-- the `sigma_est = 1.25` prior in actual use
+  their extra parameters (`delta`, `t_k`, `beta2`, `h`, `t0`, `s`) were
+  never rank-checked (`delta` and `t_k` now are), and the logistic is
+  *known* to be poorly identified (`docs/results.md`: the ceiling parameter
+  is pinned at its prior edge)
+- the `sigma_est = 1.25` prior in actual use (the later SBC runs use it)
 - the full-scale sparsity and geometry
 - the per-task latents `log_L`, `eps` (ZeroSumNormal), and `a` — the SBC
   only ranks the nine scalar hyperparameters.
 
 The "Open work" list flags SBC gaps, but the headline-configuration gap is
-broader than what is listed. A minor point: at 50 replications, the
-cov50 of `mu_L` (0.38) and of `sigma_eps` (0.60) are the kind of deviation
-that warrants more replications before "well calibrated" is asserted. Also,
-the rank statistic `(thinned < true).mean()` uses no randomized tie-break
-(fine for continuous draws, but worth a statement).
+broader than what is listed. A minor point: at 50 replications, the cov50 of `mu_L` (0.38) and of
+`sigma_eps` (0.60) show real deviation. That deviation warrants more
+replications before an assertion of "well calibrated." Also, the rank
+statistic `(thinned < true).mean()` uses no randomized tie-break (fine for
+continuous draws, but worth a statement).
 
 **Fix:** at minimum, run reduced-scale SBC on the Student-t + kink
 configuration under the 1.25 prior. Rank `nu`, `delta`, `t_k`, and some of
@@ -249,10 +251,10 @@ open.
 
 `eps_i` has no predictors. It is pure per-task noise, identified almost
 entirely by the IRT layer (and, for sparse tasks, by its prior plus the
-single sum-to-zero constraint). Many systematic properties make a task hard beyond its length: the task
-family, the number of required tool calls, the context length, and the
-reasoning type. All of them land in `eps`, and the model reports them as
-irreducible "residual difficulty." A model that regressed `eps` on even a
+single sum-to-zero constraint). Many systematic properties make a task hard beyond its length. Examples:
+the task family, the number of required tool calls, the context length, and
+the reasoning type. All of them land in `eps`, and the model reports them
+as irreducible "residual difficulty." A model that regressed `eps` on even a
 few task-level covariates would (a) shrink `sigma_eps` toward its true
 irreducible floor and (b) tell you *why* length is a noisy proxy. As it
 stands, the 8x headline conflates "difficulty that we cannot predict" with
@@ -331,9 +333,9 @@ in code.
 ### 13. The prior pushforward on the steep slope is not shown
 `beta1 ~ N(0, 1)`, while the fitted kink post-2024 slope is 3.14, which is
 approximately 3 prior SDs out. This is plausibly fine (the data dominate).
-But a prior-predictive check on `slope_now` and the doubling time would
-confirm that the `N(0,1)` slope prior and the `N(0,1.5)` intercept prior do
-not mildly fight the steep-acceleration region. The "Open work" list covers
+A prior-predictive check on `slope_now` and the doubling time would settle
+it. The check would confirm that the `N(0,1)` slope prior and the `N(0,1.5)`
+intercept prior do not mildly fight the steep-acceleration region. The "Open work" list covers
 the shape-specific priors. The base `beta1` prior deserves the same check.
 
 ---
