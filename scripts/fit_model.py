@@ -2,7 +2,7 @@
 
 Runs any of the four trend shapes (linear/kink/superexp/logistic), the
 Normal/Student-t/Weibull duration likelihoods, and the full vs. SOTA-only
-model sets; this is what produced every number in docs/results.md. Defaults
+model sets; this is what produced every number in docs/writeup.md. Defaults
 are a tiny smoke-test config (200 tune / 200 draws / 2 chains) so a bare
 invocation finishes in seconds; pass --tune/--draws/--chains for a real fit.
 
