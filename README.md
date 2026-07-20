@@ -1,12 +1,21 @@
 # Measurement-error model for METR's time horizon
 
-A Bayesian extension of Jonas Moss's [IRT reanalysis](https://www.lesswrong.com/posts/sBEzomgnYJmYHki9T) of METR's [time-horizon data](https://github.com/METR/eval-analysis-public), adding an explicit measurement-error layer for human baseline task timing. Moss's model treats each task's human time as a fixed, exactly-known scalar; this model treats it as a latent variable informed by the per-run timing data, plus a residual difficulty term ($\varepsilon_i$) that absorbs whatever task-difficulty variance isn't explained by length.
+This repository contains a Bayesian extension of Jonas Moss's [IRT reanalysis](https://www.lesswrong.com/posts/sBEzomgnYJmYHki9T) of METR's [time-horizon data](https://github.com/METR/eval-analysis-public). The extension adds a measurement-error layer for the human baseline task times. Moss's model treats each task's human time as a fixed, exactly known scalar. This model treats the human time as a latent variable, and the per-run timing data informs it. A residual difficulty term ($\varepsilon_i$) absorbs the task-difficulty variance that length does not explain.
 
-For every number and plot behind the headline results, see [`docs/results.md`](docs/results.md).
+Start with [`docs/writeup.md`](docs/writeup.md). That document tells what this model takes from Moss and from Barry. It also tells where this model and Barry's SIMEX analysis do not agree. For each number and plot behind the headline results, refer to [`docs/results.md`](docs/results.md).
+
+## What is in the model
+
+The model keeps all 228 tasks that the AI models attempted. It does not discard the tasks that only have an estimated task length. The observation set has two parts:
+
+- **525 timed baseline runs.** Each observation is the wall-clock time of one successful human attempt at a task.
+- **67 estimate annotations.** A task with no timed baseline run contributes its `human_minutes` annotation as one observation. These observations get a wider noise term (`sigma_est`) because an expert estimate is less reliable than a timed run.
+
+The [Data](#data) section gives the filter steps and the full counts.
 
 ## Setup
 
-This repo expects two sibling checkouts next to it (same parent directory), used as the raw data source and as a read-only reference implementation:
+This repository needs two sibling checkouts in the same parent directory. One is the raw data source. The other is a read-only reference implementation:
 
 ```
 some-parent-dir/
@@ -15,14 +24,14 @@ some-parent-dir/
   metr-stats/                   # git clone https://github.com/JonasMoss/metr-stats
 ```
 
-Then, from inside this repo:
+Then, from inside this repository:
 
 ```
 uv sync
 uv run python data/load_runs.py
 ```
 
-## Repo layout
+## Repository layout
 
 ```
 data/
@@ -42,7 +51,7 @@ scripts/
   compare_robust.py      # Normal vs Student-t before/after comparison
   compare_duration_dists.py  # PSIS-LOO of lognormal vs Student-t vs Weibull on the
                          # 525 baseline runs (Jacobian-corrected to a common scale)
-  sbc.py                 # reduced-scale simulation-based calibration
+  sbc.py                 # simulation-based calibration (reduced scale)
   stack_shapes.py        # PSIS-LOO + Bayesian stacking across the 4 shapes
   make_figures.py        # generates outputs/figures/*.png from the fitted .nc files
   marginal_horizon.py    # marginal (METR-style) vs conditional exp(theta) horizon
@@ -50,9 +59,21 @@ scripts/
   compare_measurement.py # baseline vs heteroscedastic vs failed-run censoring
   eps_decomposition.py   # between- vs within-family split of residual difficulty
   make_measurement_figures.py  # figures for the measurement-error experiments
+  simex.py               # Barry's SIMEX ladder on this model (add sqrt(lambda)*sigma
+                         # noise, refit, extrapolate to lambda=-1); writeup section 3
+  fork_discriminator.py  # the eps-vs-length fork: regress eps on length over
+                         # well-timed tasks, test if poorly-timed long tasks obey it
+  estimate_feedback_diagnostic.py  # Barry's circularity warning: how much the IRT
+                         # layer moves log_L on estimate-only tasks
+  # one-off analysis scratch (no argparse; reads outputs/fit_linear_robust.nc):
+  difficulty_pinning.py      # posterior sd of difficulty, and corr(log_L, eps), by group
+  weakspot_family_kin.py     # IRT signal available to long estimate-only tasks
+  check_longtask_shrinkage.py  # posterior log_L vs raw observed length, per task
+  make_eps_family_figure.py    # eps-by-family figure (needs an --eps-structure family fit)
 outputs/                 # saved InferenceData (.nc), gitignored
 outputs/figures/         # generated plots (committed, see docs/results.md)
 docs/
+  writeup.md             # the writeup: what is reused, and where this lands vs Barry
   results.md             # full results: every number and plot
   red_team_review.md     # structural critique / shortcomings
   measurement_error_improvements.md  # experiments + recommended best model
@@ -60,14 +81,9 @@ docs/
 
 ## Data
 
-Source: METR's public `eval-analysis-public` repo,
-`reports/time-horizon-1-1/data/raw/runs.jsonl` (24,008 rows, one row per
-model-task run, each carrying the task's human timing metadata).
+The data source is METR's public `eval-analysis-public` repository, file `reports/time-horizon-1-1/data/raw/runs.jsonl`. The file has 24,008 rows. Each row is one model-task run, and each row carries the task's human timing metadata.
 
-Human timing observations are the rows with `model == "human"`: the
-people who attempted (or, for a few tasks, estimated) each task's
-duration. Every other row is a model's own run carrying that task's
-human-timing metadata along for reference.
+The human timing observations are the rows with `model == "human"`. These rows come from the persons who attempted each task or, for some tasks, estimated its duration. Each other row is an AI model's own run. Those rows carry the task's human timing metadata only for reference.
 
 `data/load_runs.py` filters to:
 
@@ -75,29 +91,12 @@ human-timing metadata along for reference.
 model == "human"  AND  score_binarized == 1  AND  completed_at > 0
 ```
 
-On the current snapshot this yields 554 rows / 164 distinct tasks (525
-`human_source == "baseline"`, 29 `"estimate"`). `models/data_prep.py` then
-builds the observation set from this. Two properties of the data shape
-the observation model (both verified against the snapshot):
+On the current snapshot, this filter gives 554 rows and 164 different tasks (525 rows with `human_source == "baseline"` and 29 with `"estimate"`). `models/data_prep.py` then builds the observation set from this filtered data. Two properties of the data give the observation model its shape. The two properties are verified against the snapshot:
 
-1. `human_minutes` is a task-level annotation. It
-   is identical on every row of a task (0 of 136 multi-row tasks vary) and
-   equals the geometric mean of successful baseline wall-times where those
-   exist (median ratio 0.998). The per-run observation is wall-clock time,
-   `(completed_at - started_at)` (run-relative millisecond clocks). Within-
-   task sd of log wall-time is ~0.4-0.6 (i.e., 1.5-2x). Feeding
-   `human_minutes` per-row as if independent made `sigma_base` collapse to
-   0 and froze the sampler.
-2. The task universe is all 228 tasks models attempted (only 164 have
-   successful human runs). The 64 otherwise-dropped tasks are almost
-   all estimate-source and skew long (up to 30h); dropping them biases the
-   trend. Tasks with no timed baseline run contribute their annotation as
-   a single "estimate" observation.
+1. `human_minutes` is a task-level annotation. It is identical on each row of a task (0 of the 136 multi-row tasks vary). Where successful baseline wall-times exist, it equals their geometric mean (median ratio 0.998). The per-run observation is the wall-clock time, `completed_at - started_at` (run-relative millisecond clocks). The within-task standard deviation of log wall-time is approximately 0.4 to 0.6 (that is, 1.5x to 2x). An early version fed `human_minutes` per row as if independent. That made `sigma_base` collapse to 0 and froze the sampler.
+2. The task universe is all 228 tasks that the AI models attempted. Only 164 of these tasks have successful human runs. The other 64 tasks are almost all estimate-source, and they are long (up to 30 h). To drop them biases the trend. A task with no timed baseline run contributes its annotation as a single estimate observation.
 
-Final observation set: **525 per-run baseline wall-times + 67 task-level
-estimate annotations, over 228 tasks**. Estimate-source tasks with human
-runs (RE-Bench 8h time-boxed runs) do have wall-clock times, but those are
-budget-limited working times; only the annotation is used for them.
+The final observation set is **525 per-run baseline wall-times plus 67 task-level estimate annotations, over 228 tasks**. The estimate-source tasks with human runs (the RE-Bench 8 h time-boxed runs) do have wall-clock times. But those times are budget-limited work times. For those tasks, the model uses only the annotation.
 
 Run it:
 
@@ -112,69 +111,22 @@ Filtered (score_binarized==1 & completed_at>0): 554 rows / 164 tasks (136 tasks 
 Wrote filtered data to data/processed/runs_filtered.parquet
 ```
 
-Censoring note: the v2 spec calls for right-censoring duration observations
-at `time_limit` for RE-Bench-style runs that stack at the limit, and the
-`pm.Censored` branch in `time_horizon_model.py` implements it. In the
-current `runs.jsonl` snapshot, `time_limit` is always `0` for
-`model == "human"` rows (that field is populated for agent compute
-budgets), so no row is censored; the branch activates automatically if a
-future data pull includes time-limited human runs.
+A note on censored observations. The v2 spec tells to right-censor a duration observation at `time_limit` when RE-Bench-style runs stack at the limit. The `pm.Censored` branch in `time_horizon_model.py` implements this. In the current `runs.jsonl` snapshot, `time_limit` is always 0 for the `model == "human"` rows (METR populates that field for agent compute budgets). Thus the model censors no row. The branch becomes active automatically if a future data pull includes time-limited human runs.
 
-`models/data_prep.py` additionally pulls:
-- IRT counts: for every (model, task) pair among the 228 tasks (all
-  non-human, non-cloned models), attempt/success counts aggregated from the
-  full `runs.jsonl` (4,523 (model,task) rows across 20 models on this
-  snapshot).
-- Release dates: from `../metr-stats/data/release_dates.json`, plus
-  overrides in `models/data_prep.py` for the two models missing there
-  (`flamingo_2` == GPT-5.3-Codex and `claude_opus_4_6_inspect`, both
-  2026-02-05, sourced from METR's TH1.1 `logistic_fits/headline.csv` via
-  the runs.jsonl `alias` column). All 20 models are dated and participate
-  in the trend. A model without a date would contribute no trend term,
-  its ability captured purely by the random effect `u_m`.
+`models/data_prep.py` also pulls:
+- IRT counts. For each (model, task) pair among the 228 tasks (all non-human, non-cloned models), it aggregates attempt and success counts from the full `runs.jsonl`. On this snapshot, that gives 4,523 (model, task) rows across 20 models.
+- Release dates. These come from `../metr-stats/data/release_dates.json`, plus overrides in `models/data_prep.py` for the two models that are missing there (`flamingo_2` == GPT-5.3-Codex and `claude_opus_4_6_inspect`, both 2026-02-05). The override dates come from METR's TH1.1 `logistic_fits/headline.csv` through the `alias` column of `runs.jsonl`. All 20 models are dated and are part of the trend. A model without a date would contribute no trend term, and the random effect `u_m` would hold its ability.
 
 ## Model
 
-See the docstring at the top of `models/time_horizon_model.py` for the full
-spec. This extends Moss's 2PL model with a residual-difficulty
-term, a different identification fix suited to our difficulty scale, and
-a per-model random effect on ability.
+The docstring at the top of `models/time_horizon_model.py` gives the full spec. This model extends Moss's 2PL model with a residual difficulty term, a different identification fix that agrees with our difficulty scale, and a per-model random effect on ability.
 
-- Measurement layer: $\log(L_i) \sim \mathcal{N}(\mu_L, \sigma_L)$; baseline
-  observations $\log(\text{dur}) \sim \mathcal{N}(\log(L_i), \sigma_{\text{base}})$ (censored where
-  applicable); estimate-only observations $\log(\text{rep}) \sim \mathcal{N}(\log(L_i), \sigma_{\text{est}})$
-  with a wider prior on $\sigma_{\text{est}}$ (median 1.25, calibrated
-  to Barry's 60%-within-3x finding), reflecting that
-  expert estimates are less reliable than a real timed run.
-- IRT layer: $\text{logit}\, P(\text{success}_{im}) = a_i \left(\theta_m - (\log(L_i) + \varepsilon_i)\right)$,
-  with $a_i \sim \text{LogNormal}(0, \sigma_a)$ and the residual-difficulty
-  term $\varepsilon_i \sim \text{ZeroSumNormal}(\sigma_\varepsilon)$.
-  The sum-to-zero constraint is the identification fix for a shift
-  non-identifiability between $\varepsilon_i$ and $\theta_m$ that a free
-  $\sigma_\varepsilon$ can't resolve on its own.[^1] Moss avoids this by
-  hard-anchoring two $\theta$ values ($\theta_{\text{low}}=-1$, $\theta_{\text{high}}=+1$); that
-  doesn't work here because our difficulty scale is pinned in log-minute
-  units by the timing data, and anchors would break the log-minute
-  interpretation of $\theta_m$ ($h_{50,m} = \exp(\theta_m)$).
-- Ability trend: $\theta_m = f(t_m) + u_m$ for dated models, $\theta_m = \beta_0 + u_m$
-  for undated models, with $u_m$ a per-model random effect that lets the
-  doubling-time CI reflect model-to-model variation. $f(t_m)$ is one of
-  four fitted shapes (linear, $\beta_0 + \beta_1 t_m$, is the simplest case;
-  kink, superexponential, and logistic are the other three, combined via
-  Bayesian stacking).
-- All group-level latents ($\log L$, $\varepsilon$, $u$, named `log_L`,
-  `eps`, `u` in code) use a non-centered parameterization. With only
-  1-2 observations for most tasks, a centered $\log L \sim \mathcal{N}(\mu_L, \sigma_L)$
-  produces a funnel between $\sigma_L$ and $\log L$.
+- Measurement layer: $\log(L_i) \sim \mathcal{N}(\mu_L, \sigma_L)$. Baseline observations are $\log(\text{dur}) \sim \mathcal{N}(\log(L_i), \sigma_{\text{base}})$, censored where applicable. Estimate-only observations are $\log(\text{rep}) \sim \mathcal{N}(\log(L_i), \sigma_{\text{est}})$ with a wider prior on $\sigma_{\text{est}}$ (median 1.25, calibrated to Barry's 60%-within-3x finding). The prior is wider because an expert estimate is less reliable than a real timed run.
+- IRT layer: $\text{logit}\, P(\text{success}_{im}) = a_i \left(\theta_m - (\log(L_i) + \varepsilon_i)\right)$, with $a_i \sim \text{LogNormal}(0, \sigma_a)$ and the residual difficulty term $\varepsilon_i \sim \text{ZeroSumNormal}(\sigma_\varepsilon)$. The sum-to-zero constraint is the identification fix for a shift non-identifiability between $\varepsilon_i$ and $\theta_m$. A free $\sigma_\varepsilon$ cannot resolve that shift on its own.[^1] Moss prevents it differently: he hard-anchors two $\theta$ values ($\theta_{\text{low}}=-1$, $\theta_{\text{high}}=+1$). That fix does not work here. Our difficulty scale is pinned in log-minute units by the timing data, and anchors would break the log-minute interpretation of $\theta_m$ ($h_{50,m} = \exp(\theta_m)$).
+- Ability trend: $\theta_m = f(t_m) + u_m$ for dated models, and $\theta_m = \beta_0 + u_m$ for undated models. The per-model random effect $u_m$ lets the doubling-time CI show model-to-model variation. $f(t_m)$ is one of four fitted shapes. Linear ($\beta_0 + \beta_1 t_m$) is the simplest case. Kink, superexponential, and logistic are the other three shapes, combined with Bayesian stacking.
+- All group-level latents ($\log L$, $\varepsilon$, $u$, named `log_L`, `eps`, `u` in code) use a non-centered parameterization. Most tasks have only 1 or 2 observations. With so few observations, a centered $\log L \sim \mathcal{N}(\mu_L, \sigma_L)$ makes a funnel between $\sigma_L$ and $\log L$.
 
-Below is the model graph, generated with `pm.model_to_graphviz()` from the
-built model (Student-t duration likelihood, linear shape). Rectangles are
-deterministic nodes (the non-centered reparameterizations, `theta`, `a`,
-`eps`, `log_L`), circles are free random variables, shaded circles are
-observed. The three plates on the right give the observation counts: 4,523
-(model, task) success/attempt pairs, 67 estimate-only annotations, 525
-timed baseline runs. The `task (228)` and `model (20)` plates show which
-latents repeat per task and per model.
+The model graph below comes from `pm.model_to_graphviz()` on the built model (Student-t duration likelihood, linear shape). Rectangles are deterministic nodes: the non-centered reparameterizations, `theta`, `a`, `eps`, and `log_L`. Circles are free random variables, and shaded circles are observed variables. The three plates on the right give the observation counts: 4,523 (model, task) success/attempt pairs, 67 estimate-only annotations, and 525 timed baseline runs. The `task (228)` and `model (20)` plates show which latents repeat per task and per model.
 
 ![Model graph](outputs/figures/model_graph.png)
 
@@ -219,28 +171,21 @@ uv run python scripts/make_figures.py   # regenerates outputs/figures/*.png from
 
 ## Headline results
 
-Full detail, every plot, and the comparison against METR's and Moss's numbers: [`docs/results.md`](docs/results.md).
+For the full detail, each plot, and the comparison against METR's and Moss's numbers, refer to [`docs/results.md`](docs/results.md).
 
-- Stacked doubling time (current): **2.8 months [2.3, 3.8]**
-- Residual task-difficulty spread at fixed length (`sigma_eps`): ~8x
-- SBC (reduced scale): pass, 50/50 reps, well-calibrated
-- Weibull duration likelihood tested (Moss's suggestion): rejected, worse fit than Student-t/log-normal
-- `sigma_est` prior recalibrated to Barry's 60%-within-3x finding: headline robust to the shift
+- The current doubling time is **2.4 months [2.1, 2.7]**, from the recommended model (kink trend, Student-t duration layer, heteroscedastic `sigma_base`, family-structured `eps`). Refer to [`docs/measurement_error_improvements.md`](docs/measurement_error_improvements.md). This number is a single-shape fit, not a stack. The flat-`eps` stack across all four shapes gives 2.8 [2.3, 3.8], and the flat kink alone gives 2.7 [2.3, 3.1]. To structure `eps` is what moves the number and tightens it.
+- No refinement of the measurement *layer* moves the trend. Heteroscedasticity, Student-t, and failed-run censoring all keep the linear fit at 3.3 months. Only a new structure for the *difficulty* term moves it. This asymmetry is the model's own logic, and it is the subject of [`docs/writeup.md`](docs/writeup.md) section 3.
+- The residual task-difficulty spread at fixed length (`sigma_eps`) is approximately 8x. Approximately **two thirds of it is between-family structure**. That leaves a within-family residual near 5x, which agrees with Moss's approximately 4.7x.
+- Barry's SIMEX ladder, run again on this model, decreases the frontier 50% horizon by approximately **11%** (flat `eps`) or **8.7%** (family `eps`). Barry found 25% to 40% on METR's difficulty-equals-length model.
+- SBC (reduced scale) passes with 50 of 50 reps, well calibrated. Heteroscedasticity passes separately with 40 of 40 reps.
+- The Weibull duration likelihood (Moss's suggestion) is rejected. Its fit is worse than the Student-t and log-normal fits.
+- The `sigma_est` prior is recalibrated to Barry's 60%-within-3x finding. The headline is robust to this shift.
 
 ## Open work
 
-- SBC at the robust (Student-t) variant and at full data scale.
-- An explicit marginal-vs-conditional horizon comparison against METR's
-  definition ($\sigma_\varepsilon \approx 2.2$ log-minutes makes the two differ a lot, and
-  extrapolations are sensitive to which one you mean).
-- Prior-sensitivity pass on the shape-specific priors (t_k, h, s); the
-  sigma_est pass is done (headline insensitive to a 0.8 -> 1.25
-  prior-median shift).
-- Rerun SBC under the recalibrated sigma_est prior (the SBC table in
-  `docs/results.md` used the original median-0.8 prior).
+- SBC at full data scale, and on the family-`eps` variant (its `sigma_eps_fam` and `sigma_eps_within` still need to be added to the ranked list). The headline and recommended configurations are already SBC-backed, both 40 of 40, with `gamma_sig` calibrated. Refer to [`docs/measurement_error_improvements.md`](docs/measurement_error_improvements.md) section 6.
+- A task-family (or task-type) *covariate* on `eps`. Approximately 67% of the residual difficulty is between-family. A covariate would turn that structure into an interpretable predictor instead of a variance split.
+- Marginal-horizon *bands* on the trend plot, not only the flattening factor.
+- A prior-sensitivity pass on the shape-specific priors (t_k, h, s). The `sigma_est` pass is done. The headline is insensitive to a prior-median shift from 0.8 to 1.25.
 
-[^1]: Only $\theta_m - (\log(L_i) + \varepsilon_i)$ enters the logit, so adding a
-    constant to every $\varepsilon_i$ and subtracting it from every $\theta_m$ leaves
-    the likelihood unchanged. The mean-zero prior on $\varepsilon$ only weakly
-    penalizes this shift, producing a near-flat ridge in the posterior.
-    The sum-to-zero constraint removes the degree of freedom directly.
+[^1]: Only $\theta_m - (\log(L_i) + \varepsilon_i)$ enters the logit. Thus, if you add a constant to each $\varepsilon_i$ and subtract it from each $\theta_m$, the likelihood does not change. The mean-zero prior on $\varepsilon$ only weakly penalizes this shift, which makes a near-flat ridge in the posterior. The sum-to-zero constraint removes the degree of freedom directly.
