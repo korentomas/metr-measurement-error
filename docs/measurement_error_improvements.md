@@ -12,10 +12,10 @@ exactly: 554 human rows, 164 tasks, 525 baseline, 29 estimate). The shape is
 linear unless noted, with the Student-t duration layer, 2000 tune / 2000
 draws / 4 chains, and `target_accept 0.95`. The reconstructed baseline
 matches the published numbers to the decimal (doubling **3.3 [2.8, 4.1]
-months**, `sigma_eps` 2.16, `sigma_base` 0.41, `nu` 2.4). Thus, everything
-below is measured against a faithful anchor.
+months**, `sigma_eps` 2.16, `sigma_base` 0.41, `nu` 2.4). Thus, a faithful
+anchor stands behind every measurement below.
 
-## TL;DR — what to change
+## Summary — what to change
 
 | change | verdict | effect on headline | why |
 |---|---|---|---|
@@ -42,9 +42,9 @@ the trend, and it does.
 
 **Problem (red-team #7 and #2).** The baseline model uses one global
 `sigma_base` for the per-run log-wall-time noise. In the data, the
-within-task sd of log wall-time rises with task length: correlation
-**+0.31**, with a short-task median log-sd of **0.28** against a long-task
-median of **0.57**. A single scale over-smooths the short tasks and
+within-task sd of log wall-time rises with task length (correlation
+**+0.31**). The short-task median log-sd is **0.28**, and the long-task
+median is **0.57**. A single scale over-smooths the short tasks and
 under-smooths the long tasks.
 
 **Change.** Let the scale depend on the latent length:
@@ -303,7 +303,7 @@ doubling time outside approximately 2.5 to 4.1 months.
 The sibling data repositories drifted after this project's snapshot.
 `runs.jsonl` still matches exactly (24,008 rows). `release_dates.json` (the
 path that the code expects) is now a `data_raw/release_dates.yaml` keyed by
-display alias. It was reconstructed by a join of alias to date against the
+display alias. I reconstructed it with a join of alias to date against the
 `alias` column in `runs.jsonl`. (18 of the 20 models matched directly, and
 the other 2 came from the existing `RELEASE_DATE_OVERRIDES`.) That gives all
 20 dated models, as before. `headline.csv` (only used by `--sota-only`) is

@@ -21,7 +21,8 @@ bend near 2024 (the kink shape), the number comes down to 2.7 [2.3, 3.1]. But
 that difference is small next to the uncertainty in the elpd estimates. Thus,
 the correct read is not "kink wins." The correct read: the success/failure
 data alone cannot strongly separate the shapes. The stacked interval is
-somewhat bimodal, not clean. Extrapolations must use the stacked mixture.
+somewhat bimodal, not clean. The correct input for an extrapolation is the
+stacked mixture.
 
 What that gives you, stance by stance. If you trust the fitted stacking
 weights (0.635 kink and 0.365 linear, with nothing from superexponential and
@@ -79,7 +80,7 @@ by construction. Thus, the right pair there is my linear 3.3. The remainder
 comes from the added measurement-error layer and the per-model random
 effects, not from the input data.
 
-![Horizon vs release date, all four trend shapes with credible bands, forecast to 2029](../outputs/figures/horizon_trend.png)
+![Horizon against release date, all four trend shapes with credible bands, forecast to 2029](../outputs/figures/horizon_trend.png)
 
 The per-model 50% horizons (the points, from the kink fit) go from a few
 minutes in 2023 to approximately 20 hours by early 2026. That is the same
@@ -104,9 +105,9 @@ entirely. And the logistic flattens near three days. The full breakdown:
 The wide, poorly identified slope in the logistic row is also why its band is
 visibly the widest of the four on the plot above.
 
-The same point, that the shape is underdetermined, shows again if you look
-directly at the doubling time that each shape implies now, instead of the
-horizon curve that it draws:
+The same point, that the shape is underdetermined, shows again in a second
+view. Look directly at the doubling time that each shape implies now,
+instead of the horizon curve that it draws:
 
 ![Doubling time now, by trend shape and stacked mixture](../outputs/figures/doubling_time_density.png)
 
@@ -150,7 +151,7 @@ posterior-mean length `L_i`, with dotted +-1 sigma and +-2 sigma reference
 bands. Thus, you can read the scatter directly against the fitted `sigma_eps`
 above.
 
-![Residual task difficulty vs task length, difficulty multiplier against posterior-mean task length](../outputs/figures/difficulty_residual.png)
+![Residual task difficulty against task length, difficulty multiplier against posterior-mean task length](../outputs/figures/difficulty_residual.png)
 
 The scatter is not perfectly flat. The shortest tasks (well under a minute,
 almost always solved by every model) cluster low and tight. The longest tasks
@@ -169,7 +170,7 @@ All 20 models' success rates land inside their 95% posterior predictive
 intervals. Every task-length bin is calibrated except the trivial
 <0.1-minute bin (observed 1.000, posterior predictive [0.996, 1.000]).
 
-![Posterior predictive check: observed vs predicted success rate by task-length bin](../outputs/figures/ppc_calibration.png)
+![Posterior predictive check: observed against predicted success rate by task-length bin](../outputs/figures/ppc_calibration.png)
 
 ## Student-t and Normal measurement layers (`--robust`)
 
@@ -193,7 +194,7 @@ is 3.4 [2.8, 4.2] months under Normal and 3.3 [2.8, 4.0] under Student-t. And
 `sigma_eps` is 2.14 against 2.22. The numbers are close enough that the
 outliers never drove the trend. Now that is demonstrated, not assumed.
 
-![Outlier pull on latent task length: Normal vs Student-t, six worst-outlier tasks](../outputs/figures/outlier_pull.png)
+![Outlier pull on latent task length: Normal against Student-t, six worst-outlier tasks](../outputs/figures/outlier_pull.png)
 
 I deleted no data for this figure. It shows the same six tasks under both
 likelihoods. The Student-t fit's pull toward the task's observed median
@@ -229,7 +230,7 @@ duration minus its own task's median, for tasks with two or more timed runs).
 The three curves are the log-normal, Student-t, and Weibull-implied densities
 from the fitted parameters of each variant.
 
-![Baseline-duration residuals: observed data vs the log-normal, Student-t, and Weibull-implied densities](../outputs/figures/duration_dist_comparison.png)
+![Baseline-duration residuals: observed data against the log-normal, Student-t, and Weibull-implied densities](../outputs/figures/duration_dist_comparison.png)
 
 The Student-t (red) holds the sharp peak and the long right tail at the same
 time. The log-normal (gray) is close, but a bit too spread in the center. The
@@ -355,8 +356,8 @@ noisy to add anything past the table above. (A truly uniform histogram at
 n = 50 can look almost as lumpy as these do, by chance.) The KS test is the
 right tool for a claim of this size. The same argument applies to
 `outputs/figures/stacking_weights.png`. It shows the four numbers already in
-the stacking table above, and a bar chart of them does not teach anything
-that the table does not.
+the stacking table above. A bar chart of them does not teach anything that
+the table does not.
 
 [^2]: Barry's finding is `P(|N(0, sigma)| < ln 3) = 0.6`, which inverts to
     `sigma = ln(3) / Phi^-1(0.8) ~= 1.305` log-minutes of total estimate

@@ -7,11 +7,13 @@ README's "Open work" list and `docs/results.md` already flag several of the
 points below. This document collects all of the points in one place, adds
 the points that are *not* flagged, and ranks them by how much they threaten
 the headline. Two small analytic probes back the structural claims. (The
-probe script was a scratch file and is not in the repository. The two cited
-numbers are reproducible from the formulas given below.)
+probe script was a scratch file and is not in the repository. Probe 1 is a
+numeric integration of the logistic curve against the `eps` distribution at
+the stated parameter values. Probe 2 is the `sigma_base/sqrt(k)` pinning
+calculation. The stated numbers come from those two calculations.)
 
-The model was rebuilt independently from a synthetic 228-task, 20-model
-design, and its graph was regenerated with `pm.model_to_graphviz`. The
+I rebuilt the model independently from a synthetic 228-task, 20-model
+design, and I regenerated its graph with `pm.model_to_graphviz`. The
 structure matches the committed `outputs/figures/model_graph.png`.
 
 [`measurement_error_improvements.md`](measurement_error_improvements.md)
@@ -64,8 +66,8 @@ METR's published 50% time horizon is different. It is the length at which a
 model succeeds at 50%, **averaged over the actual mix of tasks** at that
 length. That is a marginal quantity over the `eps` (and `a`) distribution.
 With `sigma_eps ≈ 2.2` log-minutes (an 8x difficulty spread), these are
-different objects. The README's "Open work" already noted the missing
-marginal-conditional comparison.
+different objects. At the time of this review, the README's "Open work"
+list flagged the missing marginal-conditional comparison as undone.
 
 The README does **not** say *which* comparisons survive the distinction. I
 checked (probe 1):
@@ -151,7 +153,8 @@ given-up attempts. `log_L_i` is thus inferred from a downward-biased
 (faster) sample of human times. The bias is worst exactly where it matters
 most: the hard, long tasks, where humans fail more often. This bias
 propagates into `difficulty` and into the length axis that the whole trend
-is read against. No document mentions it as a limitation.
+is read against. At the time of this review, no document mentioned it as a
+limitation.
 
 **Fix:** quantify how often humans failed per task. If the count is
 non-trivial, model the human attempt as its own (censored or lapse) process,
@@ -215,18 +218,18 @@ in `scripts/sbc.py` and `docs/results.md` uses the **Normal** layer, the
 median **0.8**, and 50 replications. Thus, the calibration evidence does not
 touch:
 
-- the Student-t `nu` parameter and the heavy-tail geometry in actual use;
+- the Student-t `nu` parameter and the heavy-tail geometry in actual use
 - the kink, superexp, and logistic shapes (the kink drives the headline) —
   their extra parameters (`delta`, `t_k`, `beta2`, `h`, `t0`, `s`) are never
   rank-checked, and the logistic is *known* to be poorly identified
-  (`docs/results.md`: the ceiling parameter is pinned at its prior edge);
-- the `sigma_est = 1.25` prior in actual use;
-- the full-scale sparsity and geometry;
+  (`docs/results.md`: the ceiling parameter is pinned at its prior edge)
+- the `sigma_est = 1.25` prior in actual use
+- the full-scale sparsity and geometry
 - the per-task latents `log_L`, `eps` (ZeroSumNormal), and `a` — the SBC
   only ranks the nine scalar hyperparameters.
 
-Two SBC items are already in "Open work," but the headline-configuration gap
-is broader than what is listed. A minor point: at 50 replications, the
+The "Open work" list flags SBC gaps, but the headline-configuration gap is
+broader than what is listed. A minor point: at 50 replications, the
 cov50 of `mu_L` (0.38) and of `sigma_eps` (0.60) are the kind of deviation
 that warrants more replications before "well calibrated" is asserted. Also,
 the rank statistic `(thinned < true).mean()` uses no randomized tie-break
@@ -236,17 +239,19 @@ the rank statistic `(thinned < true).mean()` uses no randomized tie-break
 configuration under the 1.25 prior. Rank `nu`, `delta`, `t_k`, and some of
 the `eps_i` and `log_L_i` latents.
 
-**Status:** answered in
+**Status:** partially answered in
 [`measurement_error_improvements.md`](measurement_error_improvements.md),
-section 6.
+section 6 (reduced-scale runs on the headline and heteroscedastic
+configurations). Full-scale SBC and ranks on the per-task latents stay
+open.
 
 ### 7. `eps` is an unstructured catch-all with no difficulty covariate
 
 `eps_i` has no predictors. It is pure per-task noise, identified almost
 entirely by the IRT layer (and, for sparse tasks, by its prior plus the
-single sum-to-zero constraint). Anything systematic that makes a task hard
-beyond its length — the task family, the number of required tool calls, the
-context length, the reasoning type — lands in `eps` and is reported as
+single sum-to-zero constraint). Many systematic properties make a task hard beyond its length: the task
+family, the number of required tool calls, the context length, and the
+reasoning type. All of them land in `eps`, and the model reports them as
 irreducible "residual difficulty." A model that regressed `eps` on even a
 few task-level covariates would (a) shrink `sigma_eps` toward its true
 irreducible floor and (b) tell you *why* length is a noisy proxy. As it

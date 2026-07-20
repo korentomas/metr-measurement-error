@@ -42,11 +42,11 @@ noise that you estimated from the multi-attempt tasks. You found 80% of
 attempts within approximately 3x (σ ≈ 0.78), and the noise shrinks as σ²/n
 over *n* attempts. For the estimate-only tasks, you found 80% within
 approximately 4x (σ ≈ 1.05). Those two numbers are the entire empirical basis
-for how much a model can trust a timing datum. I use them directly.
+for the correct level of trust in a timing datum. I use them directly.
 
 Neither of you did the thing that your note deferred as "infeasible for this
-post": to put that noise *inside* a single joint likelihood, instead of a
-correction after the fit. Your SIMEX and your task-length cap are sensible
+post." That thing is to put the noise *inside* a single joint likelihood,
+instead of a correction after the fit. Your SIMEX and your task-length cap are sensible
 sensitivity tools on top of a frequentist fit. The Bayesian version makes the
 latent length a parameter. The timing data and the success data then inform it
 at the same time. Thus, this model is the missing corner of your analysis, not
