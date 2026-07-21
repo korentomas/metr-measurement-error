@@ -6,120 +6,108 @@ Based on:
 
 Results:
 
-- Doubling time: ~3.3 months on the plain linear trend, tightening to
-  2.4 months (95% credible interval: 2.1–2.7) with every refinement in.
+- Doubling time: ~3.3 months on the plain linear trend, dropping to
+  2.4 months (95% credible interval: 2.1–2.7) with all the refinements
+  included.
 - Tasks of the same human length differ ~8x in how hard they are for
-  models. Roughly two thirds of that is predictable task-family structure,
+  models. Roughly two thirds of that (as variance, in log space) is
+  predictable task-family structure,
   leaving a within-family spread near 5x, which agrees with Moss's ~4.7x.
 - Barry found that removing the timing noise cuts the frontier model's 50%
-  horizon by 25–40%. My model shows only ~10%, which surprised me enough
-  that section 2 is mostly me trying to prove my own model wrong.
+  horizon by 25–40%. My model shows only ~10% (more on that in section 2).
 
 ## 1. The model
 
 The timing layer is Barry's noise model with the true length hidden: each
-task has an unknown true length, timed runs scatter around it, and
-estimate annotations scatter more. How much more comes from Barry's own
-measurement — 80% of expert estimates land within ~4x of the true length —
-which I use as the prior on the estimate noise. A free fit recovers a timing noise of 0.79, close to the 0.78 Barry
-estimated by hand, with no access to that number. A Student-t version splits that into a tighter core
-(0.41) plus heavy tails, the better read of wall-clock times that include
-breaks and interruptions.
+task has an unknown true length where timed runs scatter around it and
+estimate annotations scatter *more*. How much more comes from Barry's
+measurement: 80% of expert estimates fall within ~4x of the true length,
+which I use as the prior on the estimate noise. A free fit recovers a
+timing noise of 0.79 (log scale), close to the 0.78 Barry estimated by
+hand, this is a number the fit never sees. A Student-t version splits that into a tighter core
+(0.41) plus heavy tails, a better description of wall-clock times that
+include breaks and interruptions.
 
 The success layer is Moss's IRT setup: how often each AI model succeeds at
 each task pins down ability and difficulty, with difficulty = the task's
 latent length + a per-task residual `ε` (Moss's unexplained difficulty).
-One mechanical change: the success data only see the gap between ability
-and difficulty, so a constant could slide freely between `ε` and every
+There is a big change here: the success data only see the gap between ability
+and difficulty, so a constant could shift freely between `ε` and every
 ability score. Moss pins two abilities to stop this. Doing that here would
-break the read of ability as a log time horizon, so I force `ε` to sum to
+break the interpretation of ability as a log time horizon, so I force `ε` to sum to
 zero across tasks instead.
 
 The trend layer is Moss's ability-over-release-date curve, plus a
 per-model offset so the doubling-time interval reflects real
-model-to-model scatter. Four curve shapes, averaged by predictive weight.
+model-to-model scatter. Four curve shapes, averaged by Bayesian stacking.
+
+Below is the plate graph for the model. (Circles are unknowns, shaded circles are
+data, and the plates show what repeats per task and per model.) The three
+plates at the bottom are the three data sources: success/attempt counts, estimate annotations, and timed runs.
+
+![Model graph](../outputs/figures/model_graph.png)
 
 ## 2. The SIMEX comparison
 
 I spent some time on Barry's SIMEX analysis, because at first glance
-my model kind of contradicts it: remove the timing noise and his frontier
-50% horizon falls 25–40%, mine falls ~11%. To make sure the gap is not
-just the two of us measuring different things, I ran his exact ladder on
-my model
-(`scripts/simex.py`: add extra noise to the timing, refit, extrapolate
-back to zero noise) and got an essentially flat line, so the ~11% holds
-under his own procedure.
+my model kind of contradicts it. If I removed the timing noise his frontier
+50% horizon falls 25–40% and mine fell ~10%. To make sure this gap wasn't the two of us measuring different things, I ran his exact method on my model (in `scripts/simex.py` I add extra noise to the timing, refit, extrapolate back to zero noise) and got an essentially flat line, so the ~10% holds under his own procedure.
 
-**The gap is `ε`.** The horizon rides on difficulty, and what the success
-data pin down is length + `ε` together, not length alone. METR's model has
-no `ε`, so there difficulty just is length: shrink a noisy over-long task
-and the horizon comes down with it. Barry's 25–40% is exactly right for
-that model. Give each task its own difficulty residual (fitted σ ≈ 2.2)
-and timing noise mostly just moves the split between
-length and `ε`, leaving their sum, and with it the horizon, almost
-untouched.
+So **the gap is `ε`.** The horizon depends on difficulty, and what the success
+data constrain is length + `ε` together. METR's model has no `ε`, so in that model difficulty just is length: shrink a noisy over-long task and the horizon comes down with it. Barry's 25–40% is exactly right for that model. Give each task its difficulty residual (fitted σ ≈ 2.2 in log units) and timing noise mostly moves the split between length and `ε`; their sum, and with it the horizon, stays almost unchanged.
 
-**An attempt to falsify it.** The obvious worry is that `ε` is quietly
-absorbing length bias it has no business absorbing. If a long-human,
-model-easy task is really a mis-timed short task, `ε` should run
-systematically negative on the long, poorly timed tasks. The data go the
-other way (`scripts/fork_discriminator.py`): on well-timed tasks, longer
-tasks
-are mildly harder than their length suggests, and the poorly timed long
+This is what that residual looks like in the data, each point is a task, plotted by its length and by how many times harder or easier it is than that length suggests. The vertical spread is the ~8x:
+
+![Residual difficulty vs task length](../outputs/figures/difficulty_residual.png)
+
+**An attempt to falsify it.** The obvious worry is that `ε` absorbs
+length bias it should not. If a long-human,
+model-easy task is really a mis-timed short task, `ε` should be
+systematically negative on the long, poorly timed tasks. The data show
+the opposite (`scripts/fork_discriminator.py`): on well-timed tasks, longer
+tasks are mildly harder than their length predicts, and the poorly timed long
 tasks sit clearly above even that trend. They are the 8-hour
-RE-Bench-style tasks, which are genuinely hard, and the model reads them
-that way.
+RE-Bench-style tasks, which are genuinely hard, and the model agrees.
 
-**Why the 10% is not zero.** I got the reason wrong in my first draft. My
-guess was that the long estimate-only tasks have thin success data — nice
-story, except they're the RE-Bench and AI-R&D tasks every model attempted,
-~90 times each. The actual reason is that length and `ε` trade off
-strongly in the fit (correlation ~−0.66) but not perfectly, so about a
-third of any annotation error still leaks into difficulty. And one task's
-difficulty can only be pinned so precisely against uncertain abilities (to
-within ~2.3x here), even with that many attempts. So timing noise does
-reach the horizon, just heavily damped: Barry's 30% becomes ~10%.
+![Fork discriminator](../outputs/figures/fork_discriminator.png)
+
+**Why 10%.** The absorption is not perfect, for two
+reasons. First, length and `ε` trade off strongly in the fit but not completely. Second, success data can only resolve a
+task's difficulty to within ~2.3x, even for the long tasks that every
+model attempted ~90 times. Those two gaps let some of the
+timing noise through: Barry's 25–40% becomes ~10%.
 
 ## 3. The additions, briefly
 
 **Marginal and conditional horizons.** Barry's note has the 50% horizon
 dropping under noise correction while the 80% horizon rises. The same
-split falls out of my model from the difficulty side: the residual is
-symmetric around zero, so it cancels at the 50% point and in the slope,
-but the success curve for the whole task population is ~1.9x flatter than
-for a single typical task, so the 80% horizon moves out and away.
+split appears in my model from the difficulty side: the residual is
+symmetric around zero so it cancels at the 50% point.
+But, the success curve for the whole task population is ~1.9x flatter than
+for a single typical task, so the 80% horizon rises.
 
 **Length-dependent noise.** The spread between attempts grows with task
 length (more can go wrong in a six-hour attempt than in a six-minute one).
 Letting the noise scale with length clearly improves the timing fit. It
-doesn't change the headline.
+doesn't change the doubling time.
 
 **Survivorship.** Only successful human runs anchor task length, but 129
 failed timed runs sit on the hard tasks, with median times in the hours.
-Adding them as "took at least this long" observations lifts those tasks —
-the opposite direction to Barry's long-task shrinkage, and probably both
-are happening on different tasks. I keep it as a sensitivity check because
-it changes what is being measured: METR defines the human baseline by
-successful completions only.
+Adding them as "took at least this long" observations lifts those tasks'
+lengths, the opposite of Barry's long-task shrinkage; probably both effects are real, on different tasks. I keep it as METR defines the human baseline only with successful completions.
 
-**Structure in the difficulty.** The addition I'd defend hardest.
-Splitting `ε` into a task-family effect plus a within-family leftover
-shows ~two thirds of the difficulty spread is between families:
-predictable structure, not noise. Pattern-continuation and cryptanalysis
-run ~100x harder than their length suggests, arithmetic and file-selection
-~100x easier, models being predictably good at arithmetic. The
-within-family leftover is ~5x, matching Moss's ~4.7x. And because the
-trend is fit on difficulty, and `ε` is the biggest part of difficulty,
-this is the one refinement that moves the headline: 2.4 months (2.1–2.7).
+**Structure in the difficulty.** Splitting `ε` into a task-family effect plus a within-family residual shows ~two thirds of the difficulty spread is between families. Pattern-continuation and cryptanalysis run ~100x harder than their length suggests, arithmetic and file-selection ~100x easier. The within-family spread is ~5x, matching Moss's ~4.7x. And because the trend is fit on difficulty, and `ε` is the biggest part of difficulty, this is the one refinement that moves the doubling time: 2.4 months (2.1–2.7).
+
+![Family effects on difficulty](../outputs/figures/eps_family_decomposition.png)
 
 ## 4. Conclusion
 
-The doubling time stays between 2.4 and 3.3 months through every variant,
-so the trend is robust to how the timing is modeled. Removing the timing
-noise moves the horizon by 9–11% whichever model variant does the
-correcting, an order of magnitude below the difficulty-equals-length
-figure. What remains is that
-pinning down a single task's difficulty from success data has a floor
-(~2.3x here, even with ~90 attempts), and some of Barry's length-noise
-effect survives through it as that 10%. The question I can't settle from
-here is whether that floor belongs to the model or to the data.
+![Horizon trend](../outputs/figures/horizon_trend.png)
+
+The doubling time stays between 2.4 and 3.3 months in every version of
+the model, so the trend does not depend on how the timing is handled.
+Removing the timing noise shifts the horizon by only 9–11%, roughly a
+third of Barry's 25–40%. That ~10% remains because success data can only
+measure a task's difficulty to within ~2.3x, even on tasks every model
+attempted ~90 times, and that uncertainty lets a small part of the
+timing noise reach the horizon.
