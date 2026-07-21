@@ -1,114 +1,92 @@
 # Measurement-error model for METR's time horizon
 
-METR tracks AI progress with a simple question: how long a task (in human
-time) can an AI agent complete? Their answer, the 50% time horizon, depends
-on how long each task takes a person. But those human times are noisy. Some
-tasks were timed once. Some were never timed, only estimated. Two people on
-the same task can differ by a factor of 2 or more.
+This repository contains a Bayesian reanalysis of METR's [time-horizon data](https://github.com/METR/eval-analysis-public) that models the noise in human task times. It extends Jonas Moss's [IRT reanalysis](https://www.lesswrong.com/posts/sBEzomgnYJmYHki9T) and follows the direction in Alexander Barry's [note on modeling assumptions](https://metr.org/notes/2026-03-20-impact-of-modelling-assumptions-on-time-horizon-results/). The full writeup is in [`docs/writeup.md`](docs/writeup.md).
 
-This repository contains a Bayesian model that keeps that noise inside the
-model instead of pretending the times are exact. Each task's true length is
-a hidden quantity. The timed runs and the estimates inform it, with the
-appropriate amount of trust in each. The model then fits the ability trend
-on top, so that every horizon number carries the timing uncertainty with
-it.
+## Overview
 
-The full story, and where this model lands against METR's own noise
-analysis, is in [`docs/writeup.md`](docs/writeup.md).
+The model builds on METR's TH work by:
 
-## The result
+1. Treating each task's human time as a latent variable instead of a constant, based on the timed baseline runs and expert estimates
+2. Fitting a success/failure (IRT) layer where a task's difficulty is its latent length + a residual, so tasks harder (or easier) than their length suggest their own term
+3. Fitting an ability trend over model release dates jointly with the two layers above
+4. Reading the Time Horizon as exp(ability) and the doubling time from the trend slope
 
-The current doubling time of the 50% horizon comes out to **2.4 months
-[2.1, 2.7]** under the best model. Across every variant tried, it stays
-inside 2.4 to 3.3 months. Two other findings:
+Annotations that weren't timed get a wider noise term (`sigma_est`) instead of being dropped.
 
-- Tasks of the same human length differ enormously in how hard they are
-  for AI models — a spread of roughly 8x. About two thirds of that spread
-  is predictable from the task's family (its type of work), not noise.
-- Correcting the timing noise moves the frontier horizon by only about
-  10%, not the 25% to 40% that a simpler model implies. The reason is in
-  the writeup, section 3.
+**Key finding**: the current doubling time is 2.4 months (95% credible interval: 2.1–2.7) under the recommended model, and stays within 2.4–3.3 months across every variant tried. Correcting the timing noise moves the frontier horizon by only ~10%, not the 25–40% a difficulty-equals-length model implies (writeup, section 2).
 
 ![Horizon trend](outputs/figures/horizon_trend.png)
 
-## What is in the model
-
-All 228 tasks that the AI models attempted are in the model. Nothing is
-thrown away:
-
-- **525 timed runs** — real people who completed a task with the clock
-  running. These carry the most weight.
-- **67 estimate-only annotations** — tasks that no one completed with a
-  timer. These enter with a wider noise term, because an expert guess is
-  less reliable than a stopwatch.
-- **4,523 success/failure counts** — every (model, task) attempt record,
-  across 20 AI models with release dates.
-
-The model has three connected parts:
-
-1. **Timing part.** Each task has a hidden true length. Timed runs scatter
-   around it. A heavy-tailed distribution absorbs the occasional run where
-   someone took a long break mid-task.
-2. **Difficulty part.** How often each AI model succeeds at each task tells
-   the model how hard the task really is. Difficulty is the hidden length
-   plus a per-task adjustment for tasks that are harder or easier than
-   their length suggests.
-3. **Trend part.** Each AI model's ability follows a curve over its release
-   date. The slope of that curve gives the doubling time. Four curve shapes
-   are fitted and combined by predictive weight.
-
-All three parts are fitted at the same time, so the timing evidence and the
-success evidence both get a say in every number.
-
-## Setup and run
-
-This repository expects two sibling checkouts in the same parent directory
-(the raw data source and a reference implementation):
+## Repository Structure
 
 ```
+.
+├── data/
+│   └── load_runs.py           # Filters METR's runs.jsonl to human timing observations
+├── models/
+│   ├── data_prep.py           # Builds the model's input arrays
+│   └── time_horizon_model.py  # The PyMC model (full spec in its docstring)
+├── scripts/
+│   ├── fit_model.py           # Fits any variant; flags select shape and options
+│   ├── analyze_fit.py         # Horizons, doubling time, checks on a saved fit
+│   ├── make_figures.py        # Regenerates outputs/figures/
+│   ├── simex.py               # Barry's SIMEX ladder run on this model (writeup section 2)
+│   ├── fork_discriminator.py  # Is eps absorbing length bias? (writeup section 2)
+│   ├── eps_decomposition.py   # The family split that moves the headline (writeup section 3)
+│   └── ...                    
+├── docs/
+│   └── writeup.md
+└── outputs/figures/
+```
+
+## Installation
+
+The repository expects two sibling checkouts:
+
+```bash
 some-parent-dir/
-  metr-measurement-error/       # this repo
-  eval-analysis-public/         # git clone https://github.com/METR/eval-analysis-public
-  metr-stats/                   # git clone https://github.com/JonasMoss/metr-stats
+  metr-measurement-error/      # this repo
+  eval-analysis-public/        # git clone https://github.com/METR/eval-analysis-public
+  metr-stats/                  # git clone https://github.com/JonasMoss/metr-stats
 ```
 
-Then:
-
-```
+```bash
 uv sync
-uv run python data/load_runs.py     # build the filtered dataset
-uv run python scripts/fit_model.py  # quick smoke-test fit (seconds)
+uv run python data/load_runs.py
+```
 
-# The recommended full fit:
+## Running the Model
+
+```bash
+# Smoke test (200 tune / 200 draws, finishes in seconds):
+uv run python scripts/fit_model.py
+
+# Recommended model (kink trend, Student-t noise, length-dependent noise scale,
+# family-structured residual difficulty):
 uv run python scripts/fit_model.py --tune 2000 --draws 2000 --chains 4 --target-accept 0.95 \
     --shape kink --robust --heteroscedastic --eps-structure family --log-likelihood
 
 uv run python scripts/analyze_fit.py --fit outputs/fit_kink_robust_het_fameps.nc
 ```
 
-`scripts/make_figures.py` rebuilds the figures. It needs one `--robust` fit
-per trend shape (`--shape linear`, `kink`, `superexp`, `logistic`), plus a
-plain and a `--duration-dist weibull` linear fit for the comparison plots.
+`scripts/make_figures.py` rebuilds the figures. It needs one `--robust` fit per trend shape (`linear`, `kink`, `superexp`, `logistic`), plus a plain and a `--duration-dist weibull` linear fit for the comparison plots.
 
-## Layout
+## Data
 
-```
-data/load_runs.py        # filters METR's runs.jsonl to the human timing data
-models/data_prep.py      # builds the arrays the model needs
-models/time_horizon_model.py  # the model itself (full spec in its docstring)
-scripts/fit_model.py     # fits any variant; flags control shape and options
-scripts/analyze_fit.py   # horizons, doubling time, checks on a saved fit
-scripts/make_figures.py  # regenerates the figures
-docs/writeup.md          # the full writeup
-```
+Source: `reports/time-horizon-1-1/data/raw/runs.jsonl` in `eval-analysis-public` (24,008 rows). The observation set:
 
-The remaining scripts reproduce specific analyses in the writeup (each has
-a docstring saying which).
+| Observations | Count | Role |
+|---|---|---|
+| Timed baseline runs (`model == "human"`, successful) | 525 | anchor each task's latent length |
+| Estimate-only annotations | 67 | same, with wider noise (`sigma_est`) |
+| (model, task) success/attempt counts | 4,523 | identify difficulty and ability |
+| Tasks | 228 | all tasks any model attempted |
+| AI models (all dated) | 20 | trend over release dates |
 
-## Credit
+## Citation
 
-This model builds directly on two pieces of work. Jonas Moss's reanalysis
-of the METR data supplied the exam-style (item response) framing and the
-trend structure. Alexander Barry's note on modeling assumptions supplied
-the problem statement and the noise calibration. The writeup states
-precisely what came from where.
+If you use this code, please cite this repository
+
+## License
+
+See LICENSE file for details.
