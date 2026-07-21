@@ -27,6 +27,13 @@ README's Results section embeds:
   8. difficulty_residual.png -- posterior difficulty multiplier exp(eps_i)
                                vs task length, with +-1/2 sigma bands: our
                                version of Moss's fig-difficulty-variation.
+  9. fork_discriminator.png -- the falsification test from
+                               scripts/fork_discriminator.py as a picture:
+                               eps-vs-length trend on well-timed tasks
+                               (>=3 timed runs), with the poorly timed long
+                               tasks overlaid. If eps were absorbing length
+                               overestimation (Barry's reading), those tasks
+                               would sit below the trend; they sit above.
 
 Style deliberately follows Jonas Moss's own figures
 (metr-stats/scripts/make_figures.py): plain matplotlib defaults, shaded
@@ -639,10 +646,9 @@ def fig_difficulty_residual(data) -> None:
     ax.set_xticklabels(tick_labels, fontsize=8.5)
     ax.set_xlim(L_minutes.min() * 0.6, L_minutes.max() * 1.6)
 
-    yticks = sorted({round(1 / mult_2sig, 3), round(1 / mult_1sig, 3), 0.5, 1.0, 2.0,
-                      round(mult_1sig, 1), round(mult_2sig, 1)})
+    yticks = [0.01, 0.1, 1.0, 10.0, 100.0]
     ax.set_yticks(yticks)
-    ax.set_yticklabels([f"{y:.1f}x" if y >= 0.1 else f"{y:.2f}x" for y in yticks], fontsize=8)
+    ax.set_yticklabels([f"{y:g}x" for y in yticks], fontsize=8)
     ax.grid(True, which="major", axis="y", ls="--", lw=0.5, alpha=0.2)
 
     for val, sign in (
@@ -657,6 +663,72 @@ def fig_difficulty_residual(data) -> None:
     fig.tight_layout()
     fig.savefig(OUT / "difficulty_residual.png")
     plt.close(fig)
+
+
+def fig_fork_discriminator(data) -> None:
+    idata = az.from_netcdf(OUT.parent / "fit_linear_robust.nc")
+    post = idata.posterior
+    log_L = post["log_L"].stack(s=("chain", "draw")).values.mean(axis=1)
+    eps = post["eps"].stack(s=("chain", "draw")).values.mean(axis=1)
+    del idata
+    gc.collect()
+
+    # Same split as scripts/fork_discriminator.py: tasks with >=3 timed runs
+    # have their length pinned by data and carry the trustworthy eps-vs-length
+    # trend; the poorly timed long tasks (<=1 timed run, top length quartile)
+    # are where Barry's length-overestimation reading and the eps reading
+    # disagree about which side of that trend they should fall on.
+    base_mask = ~data.is_estimate & ~data.is_censored
+    nruns = np.bincount(data.task_idx_obs[base_mask], minlength=data.n_tasks)
+    well = nruns >= 3
+    poor_long = (nruns <= 1) & (log_L >= np.quantile(log_L, 0.75))
+    rest = ~well & ~poor_long
+
+    slope, intercept = np.polyfit(log_L[well], eps[well], 1)
+
+    L_minutes = np.exp(log_L)
+    multiplier = np.exp(eps)
+
+    fig, ax = plt.subplots(figsize=(9.8, 4.8))
+    ax.axhline(1.0, color="gray", ls="--", lw=0.8, alpha=0.6)
+
+    ax.scatter(L_minutes[rest], multiplier[rest], s=14, alpha=0.25,
+               color="gray", edgecolor="none", zorder=1, label="other tasks")
+    ax.scatter(L_minutes[well], multiplier[well], s=16, alpha=0.55,
+               color="tab:blue", edgecolor="none", zorder=2,
+               label="well-timed (>=3 timed runs)")
+    ax.scatter(L_minutes[poor_long], multiplier[poor_long], s=30, alpha=0.85,
+               color="tab:orange", edgecolor="none", zorder=3,
+               label="poorly timed, long (<=1 timed run)")
+
+    xs = np.linspace(log_L.min(), log_L.max(), 100)
+    ax.plot(np.exp(xs), np.exp(intercept + slope * xs), color="tab:blue",
+            lw=1.2, alpha=0.8, zorder=2,
+            label="eps-vs-length trend on well-timed tasks")
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Task length, posterior mean L_i")
+    ax.set_ylabel("Difficulty multiplier\n(1x = average for this task length)")
+    ax.set_title("Do the poorly timed long tasks obey the well-timed trend?")
+
+    tick_minutes = [1 / 60, 1, 10, 60, 4 * 60, 24 * 60]
+    tick_labels = ["1 sec", "1 min", "10 min", "1 hour", "4 hours", "1 day"]
+    ax.set_xticks(tick_minutes)
+    ax.set_xticklabels(tick_labels, fontsize=8.5)
+    ax.set_xlim(L_minutes.min() * 0.6, L_minutes.max() * 1.6)
+
+    yticks = [0.01, 0.1, 1.0, 10.0, 100.0]
+    ax.set_yticks(yticks)
+    ax.set_yticklabels([f"{y:g}x" for y in yticks], fontsize=8)
+    ax.grid(True, which="major", axis="y", ls="--", lw=0.5, alpha=0.2)
+
+    ax.legend(fontsize=8, loc="lower right", framealpha=0.9)
+
+    fig.tight_layout()
+    fig.savefig(OUT / "fork_discriminator.png")
+    plt.close(fig)
+    print(f"wrote {OUT / 'fork_discriminator.png'}")
     print("wrote", OUT / "difficulty_residual.png")
 
 
@@ -747,6 +819,7 @@ def main() -> None:
     fig_doubling_time_density(weights)
     fig_duration_dist_comparison(data)
     fig_difficulty_residual(data)
+    fig_fork_discriminator(data)
 
 
 if __name__ == "__main__":
