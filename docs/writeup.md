@@ -77,7 +77,7 @@ task's difficulty to within ~2.3x, even for the long tasks that every
 model attempted ~90 times. Those two gaps let some of the
 timing noise through: Barry's 25–40% becomes ~10%.
 
-## 3. The additions, briefly
+## 3. The additions
 
 **Marginal and conditional horizons.** Barry's note has the 50% horizon
 dropping under noise correction while the 80% horizon rises. The same
@@ -111,3 +111,141 @@ third of Barry's 25–40%. That ~10% remains because success data can only
 measure a task's difficulty to within ~2.3x, even on tasks every model
 attempted ~90 times, and that uncertainty lets a small part of the
 timing noise reach the horizon.
+
+## Appendix: full model specification
+
+Task $i$, AI model $m$, timed run $j$. Data: timed human runs
+$\log d_{ij}$, estimate-only annotations $\log r_i$, success counts
+$(s_{im}, n_{im})$, release dates $t_m$ (years, centered on the dated
+models' mean). Lengths, difficulties, and abilities all live on the
+log-minutes scale. The blocks below give the headline configuration
+(kink trend, Student-t timing, length-dependent noise,
+family-structured $\varepsilon$); variants at the end. Implementation:
+`build_model` in `models/time_horizon_model.py`, one likelihood per
+observation group.
+
+### Measurement layer
+
+Each task's true log length $\log L_i$ is latent. Timed runs scatter
+around it with heavy tails; annotations scatter more, with the noise
+scale growing in task length:
+
+```math
+\begin{aligned}
+\mu_L &\sim \mathrm{Normal}(3,\ 2) \\
+\sigma_L &\sim \mathrm{HalfNormal}(1.5) \\
+\log L_i &\sim \mathrm{Normal}(\mu_L,\ \sigma_L) \\
+\sigma_{\mathrm{base}} &\sim \mathrm{HalfNormal}(1) \\
+\gamma_\sigma &\sim \mathrm{Normal}(0,\ 0.5) \\
+\sigma_{\mathrm{base},i} &= \sigma_{\mathrm{base}}\, e^{\gamma_\sigma (\log L_i - \mu_L)} \\
+\nu &\sim \mathrm{Gamma}(2,\ 0.1) \\
+\log d_{ij} &\sim \mathrm{StudentT}(\nu,\ \log L_i,\ \sigma_{\mathrm{base},i}) \\
+\sigma_{\mathrm{est}} &\sim \mathrm{LogNormal}(\log 1.25,\ 0.5) \\
+\log r_i &\sim \mathrm{Normal}(\log L_i,\ \sigma_{\mathrm{est}})
+\end{aligned}
+```
+
+The $\sigma_{\mathrm{est}}$ prior median comes from Barry's finding (LW
+comments on Moss's post) that ~60% of annotations fall within 3x of
+the baseline time: $\ln 3 / \Phi^{-1}(0.8) = 1.305$ total log-sd,
+minus the baseline geomean's own ~0.3 contribution $\to$ ~1.27. No
+task has both annotation types, so the data cannot check this; it
+enters as prior evidence only. $\gamma_\sigma = 0$ recovers the
+homoscedastic model.
+
+Code: `mu_L`, `sigma_L`, `log_L`, `sigma_base`, `gamma_sig`, `nu`,
+`sigma_est`; likelihoods `dur_base_obs`, `dur_estimate`.
+
+### Success layer (2PL IRT)
+
+Difficulty is the latent log length plus a residual $\varepsilon_i$,
+decomposed into a task-family effect $\eta_{f(i)}$ (family index $g$,
+$f(i)$ the task's family) and a within-family residual $\zeta_i$:
+
+```math
+\begin{aligned}
+\sigma_a &\sim \mathrm{HalfNormal}(0.5) \\
+\log a_i &\sim \mathrm{Normal}(0,\ \sigma_a) \\
+\sigma_{\mathrm{fam}} &\sim \mathrm{HalfNormal}(0.5) \\
+\sigma_{\mathrm{within}} &\sim \mathrm{HalfNormal}(0.5) \\
+\eta_g &\sim \mathrm{Normal}(0,\ \sigma_{\mathrm{fam}}) \\
+\zeta_i &\sim \mathrm{Normal}(0,\ \sigma_{\mathrm{within}}) \\
+\varepsilon_i &= \eta_{f(i)} + \zeta_i - \overline{(\eta + \zeta)} \\
+\operatorname{logit} p_{im} &= a_i \left(\theta_m - (\log L_i + \varepsilon_i)\right) \\
+s_{im} &\sim \mathrm{Binomial}(n_{im},\ p_{im})
+\end{aligned}
+```
+
+Subtracting the realized mean pins $\sum_i \varepsilon_i = 0$ exactly.
+Identification: the likelihood sees only
+$\theta_m - (\log L_i + \varepsilon_i)$, so a constant shifts freely
+between $\varepsilon$ and all $\theta_m$; Moss anchors two abilities
+instead, which here would break $\theta$'s log-minutes interpretation.
+
+Code: `sigma_a`, `a`, `sigma_eps_fam`, `sigma_eps_within`, `eps`;
+likelihood `successes`.
+
+### Ability trend
+
+Ability is a shape function of release date plus a per-model offset;
+undated models get only the intercept and offset. The headline kink
+shape:
+
+```math
+\begin{aligned}
+\beta_0 &\sim \mathrm{Normal}(0,\ 1.5) \\
+\beta_1 &\sim \mathrm{Normal}(0,\ 1) \\
+\delta &\sim \mathrm{Normal}(0,\ 1) \\
+t_k &\sim \mathrm{Normal}(0,\ 0.75) \\
+f(t) &= \beta_0 + \beta_1 t + \delta\, w\, \mathrm{softplus}\!\left(\tfrac{t - t_k}{w}\right), \quad w = 0.1\ \text{yr} \\
+\sigma_u &\sim \mathrm{HalfNormal}(1) \\
+u_m &\sim \mathrm{Normal}(0,\ \sigma_u) \\
+\theta_m &= \beta_0 + \left(f(t_m) - \beta_0\right)\mathbb{1}[\text{dated}_m] + u_m
+\end{aligned}
+```
+
+The other three shapes, combined with the kink by Bayesian stacking
+(PSIS-LOO on the success likelihood, the only term the shapes differ
+on):
+
+```math
+\begin{aligned}
+\text{linear:}\quad & f(t) = \beta_0 + \beta_1 t \\
+\text{super-exponential:}\quad & f(t) = \beta_0 + \beta_1 t + \beta_2 t^2, \quad \beta_2 \sim \mathrm{Normal}(0,\ 0.5) \\
+\text{logistic:}\quad & f(t) = \beta_0 + h\, \mathrm{sigmoid}\!\left(\tfrac{t - t_0}{s}\right), \\
+& \beta_0 \sim \mathrm{Normal}(0,\ 2),\ h \sim \mathrm{HalfNormal}(8),\ t_0 \sim \mathrm{Normal}(0,\ 1),\ s \sim \mathrm{LogNormal}(\log 0.5,\ 0.5)
+\end{aligned}
+```
+
+Conditional ($\varepsilon = 0$) 50% horizon at time $t$: $e^{f(t)}$
+minutes. Current doubling time:
+$\mathrm{DT} = 12 \ln 2 \,/\, f'(t_{\mathrm{now}})$ months, with
+$t_{\mathrm{now}}$ the latest dated model's release date.
+
+Code: `beta0`, `beta1`, `delta`, `t_k`, `sigma_u`, `u`, `theta`,
+`slope_now`.
+
+### Sampling
+
+$\log L_i$, $\log a_i$, $\eta$, $\zeta$, and $u_m$ are sampled in
+non-centered form, e.g.
+
+```math
+\log L_i = \mu_L + \sigma_L z_i, \qquad z_i \sim \mathrm{Normal}(0,\ 1)
+```
+
+with only 1–2 timing observations per task, the centered form is a
+funnel (divergences, $\hat{R} > 2$); non-centering fixes the geometry.
+NUTS via `pm.sample`; simulation-based calibration in `scripts/sbc.py`.
+
+### Variants
+
+Each changes one piece of the headline model:
+
+| Variant | Change |
+| --- | --- |
+| Normal timing | $\mathrm{StudentT} \to \mathrm{Normal}$ for timed runs |
+| Weibull timing | $d_{ij} \sim \mathrm{Weibull}(\alpha_w,\ \beta_i)$, raw scale, median-matched $\beta_i = L_i / (\ln 2)^{1/\alpha_w}$ so $\log L_i$ stays the log median wall time |
+| Flat $\varepsilon$ | $\varepsilon_i \sim \mathrm{ZeroSumNormal}(\sigma_\varepsilon)$, $\sigma_\varepsilon \sim \mathrm{HalfNormal}(0.5)$ |
+| Survivorship | failed human runs right-censored at wall time $c_{ij}$: term $P(\log d_{ij} > \log c_{ij})$; same path handles time-limit censoring (none in current data) |
+| Cut | estimate-only tasks: IRT layer uses $\log r_i$ as a fixed constant, not the latent $\log L_i$ |
