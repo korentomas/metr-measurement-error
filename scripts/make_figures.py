@@ -27,7 +27,15 @@ README's Results section embeds:
   8. difficulty_residual.png -- posterior difficulty multiplier exp(eps_i)
                                vs task length, with +-1/2 sigma bands: our
                                version of Moss's fig-difficulty-variation.
-  9. fork_discriminator.png -- the falsification test from
+  9. ppc_link.png           -- posterior-predictive vs observed success rate
+                               by fitted-gap bin (task x model cells binned
+                               by the posterior mean of a_i(theta_m - D_i)).
+                               Unlike the by-length PPC, the free per-task
+                               eps cannot absorb misfit along this axis, so
+                               deviations in the extreme bins test the 2PL
+                               logistic link itself (guessing floor / slip
+                               ceiling, Barry's easy-task-failure concern).
+ 10. fork_discriminator.png -- the falsification test from
                                scripts/fork_discriminator.py as a picture:
                                eps-vs-length trend on well-timed tasks
                                (>=3 timed runs), with the poorly timed long
@@ -367,7 +375,7 @@ def fig_horizon_trend(data, dates: dict[str, date]) -> None:
 # 2. PPC calibration by task-length bin
 # ---------------------------------------------------------------------------
 def fig_ppc(data) -> None:
-    idata = az.from_netcdf(OUT.parent / "fit_linear_robust.nc")
+    idata = az.from_netcdf(OUT.parent / "fit_kink_robust_het_fameps.nc")
     post = idata.posterior
     theta = post["theta"].stack(s=("chain", "draw")).values
     a = post["a"].stack(s=("chain", "draw")).values
@@ -428,6 +436,93 @@ def fig_ppc(data) -> None:
 # ---------------------------------------------------------------------------
 # 3. Outlier pull: Normal vs Student-t
 # ---------------------------------------------------------------------------
+def fig_ppc_gap(data) -> None:
+    """PPC binned by the fitted gap eta = a_i (theta_m - D_i) instead of by
+    task length. eps shifts a task equally for all models and u_m shifts a
+    model equally for all tasks, so neither can absorb a deviation that is a
+    function of the gap; the extreme bins are a real test of the logistic
+    link's tails."""
+    idata = az.from_netcdf(OUT.parent / "fit_kink_robust_het_fameps.nc")
+    post = idata.posterior
+    theta = post["theta"].stack(s=("chain", "draw")).values
+    a = post["a"].stack(s=("chain", "draw")).values
+    log_L = post["log_L"].stack(s=("chain", "draw")).values
+    eps = post["eps"].stack(s=("chain", "draw")).values
+
+    ti, mi = data.task_idx_irt, data.model_idx_irt
+    eta = a[ti, :] * (theta[mi, :] - (log_L[ti, :] + eps[ti, :]))
+    p = 1.0 / (1.0 + np.exp(-eta))
+    rng = np.random.default_rng(1234)
+    n = data.n_attempts[:, None]
+    s_rep = rng.binomial(n, p)
+
+    eta_mean = eta.mean(axis=1)
+    n_bins = 10
+    bins = np.quantile(eta_mean, np.linspace(0, 1, n_bins + 1))
+    bin_idx = np.clip(np.digitize(eta_mean, bins) - 1, 0, n_bins - 1)
+
+    centers, obs_rates, pp_means, pp_los, pp_his = [], [], [], [], []
+    for b in range(n_bins):
+        rows = bin_idx == b
+        if rows.sum() == 0:
+            continue
+        obs_rate = data.n_successes[rows].sum() / data.n_attempts[rows].sum()
+        rep_rate = s_rep[rows, :].sum(axis=0) / data.n_attempts[rows].sum()
+        centers.append(eta_mean[rows].mean())
+        obs_rates.append(obs_rate)
+        pp_means.append(rep_rate.mean())
+        lo, hi = np.quantile(rep_rate, [0.025, 0.975])
+        pp_los.append(lo)
+        pp_his.append(hi)
+
+    centers = np.array(centers)
+    obs_rates = np.array(obs_rates)
+    pp_means = np.array(pp_means)
+    pp_los, pp_his = np.array(pp_los), np.array(pp_his)
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    grid = np.linspace(centers.min() - 0.5, centers.max() + 0.5, 200)
+    ax.plot(grid, 1.0 / (1.0 + np.exp(-grid)), color="tab:gray", lw=1, ls="--", label="logistic link")
+    ax.plot(centers, pp_means, color="tab:blue", lw=2, label="posterior predictive mean")
+    ax.fill_between(centers, pp_los, pp_his, color="tab:blue", alpha=0.2, lw=0, label="95% posterior predictive")
+    ax.plot(centers, obs_rates, "o", color="black", markersize=7, label="observed", zorder=3)
+
+    ax.set_xlabel("Fitted gap  $a_i(\\theta_m - D_i)$, posterior mean (logit units)")
+    ax.set_ylabel("Success rate")
+    ax.set_title("Posterior predictive check: success rate by fitted-gap bin")
+    ax.set_ylim(-0.03, 1.03)
+    ax.legend(frameon=False, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(OUT / "ppc_link.png")
+    plt.close(fig)
+    print("wrote", OUT / "ppc_link.png")
+
+    # Barry's easy-task-failure statistic: cells the model is confident about
+    # (posterior mean p > 0.95) -- how many failures does it predict there vs
+    # how many actually happened?
+    p_mean = p.mean(axis=1)
+    easy = p_mean > 0.95
+    obs_fail = (data.n_attempts[easy] - data.n_successes[easy]).sum()
+    rep_fail = data.n_attempts[easy].sum() - s_rep[easy, :].sum(axis=0)
+    lo, hi = np.quantile(rep_fail, [0.025, 0.975])
+    print(
+        f"easy cells (mean p>0.95): n_attempts={data.n_attempts[easy].sum()}, "
+        f"observed failures={obs_fail}, predicted failures={rep_fail.mean():.1f} [{lo:.0f}, {hi:.0f}]"
+    )
+    # and the top gap bin specifically
+    top = bin_idx == n_bins - 1
+    obs_top = (data.n_attempts[top] - data.n_successes[top]).sum()
+    rep_top = data.n_attempts[top].sum() - s_rep[top, :].sum(axis=0)
+    lo_t, hi_t = np.quantile(rep_top, [0.025, 0.975])
+    print(
+        f"top gap bin: n_attempts={data.n_attempts[top].sum()}, "
+        f"observed failures={obs_top}, predicted failures={rep_top.mean():.1f} [{lo_t:.0f}, {hi_t:.0f}]"
+    )
+
+    del idata
+    gc.collect()
+
+
 def fig_outlier_pull(data) -> None:
     id_n = az.from_netcdf(OUT.parent / "fit_linear.nc")
     id_r = az.from_netcdf(OUT.parent / "fit_linear_robust.nc")
@@ -812,6 +907,7 @@ def main() -> None:
 
     fig_horizon_trend(data, dates)
     fig_ppc(data)
+    fig_ppc_gap(data)
     fig_outlier_pull(data)
     fig_sbc_ranks()
     weights = _compute_stacking_weights()
